@@ -44,6 +44,19 @@ export interface SessionStat {
   hasReplay: boolean
 }
 
+export interface ErrorGroup {
+  fingerprint: string
+  site: string
+  message: string
+  eventType: string     // 'js_error' | 'network_error'
+  source?: string
+  stack?: string
+  count: number
+  sessions: Set<string>
+  firstSeen: number
+  lastSeen: number
+}
+
 export interface Checkpoint {
   site: string
   lastT: number       // highest `t` processed so far

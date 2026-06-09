@@ -12,3 +12,16 @@ export interface SessionRow {
   started: number; ended: number; duration: number
   urlCount: number; eventCount: number; hasReplay: boolean
 }
+
+export interface ErrorGroup {
+  fingerprint: string
+  site: string
+  message: string
+  eventType: string
+  source: string | null
+  stack: string | null
+  count: number
+  sessions: number
+  firstSeen: number
+  lastSeen: number
+}

@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { HeatmapOverlay } from './components/HeatmapOverlay'
 import { ZoneStats      } from './components/ZoneStats'
 import { SessionList    } from './components/SessionList'
+import { ErrorList      } from './components/ErrorList'
 import { ReplayModal    } from './components/ReplayModal'
-import { fetchHeatmap, fetchZones, fetchSessions, fetchReplay } from './api'
-import type { HeatmapCell, ZoneRow, SessionRow } from './types'
+import { fetchHeatmap, fetchZones, fetchSessions, fetchReplay, fetchErrors } from './api'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup } from './types'
 
-type Tab = 'heatmap' | 'zones' | 'sessions'
+type Tab = 'heatmap' | 'zones' | 'sessions' | 'errors'
 
 export function App() {
   const [siteInput, setSiteInput] = useState('')
@@ -21,6 +22,7 @@ export function App() {
   const [cells,    setCells]    = useState<HeatmapCell[]>([])
   const [zones,    setZones]    = useState<ZoneRow[]>([])
   const [sessions, setSessions] = useState<SessionRow[]>([])
+  const [errors,   setErrors]   = useState<ErrorGroup[]>([])
 
   const [replaySid,     setReplaySid]     = useState('')
   const [replayEvents,  setReplayEvents]  = useState<unknown[]>([])
@@ -43,6 +45,7 @@ export function App() {
       if (t === 'heatmap')  setCells(await fetchHeatmap(q.site, q.url || undefined))
       if (t === 'zones')    setZones(await fetchZones(q.site, q.url || undefined))
       if (t === 'sessions') setSessions(await fetchSessions(q.site, { limit: 200 }))
+      if (t === 'errors')   setErrors(await fetchErrors(q.site, { limit: 200 }))
     } catch (e) {
       setError(String(e))
     } finally {
@@ -71,6 +74,7 @@ export function App() {
     if (tab === 'heatmap')  return <HeatmapOverlay cells={cells} />
     if (tab === 'zones')    return <ZoneStats zones={zones} />
     if (tab === 'sessions') return <SessionList sessions={sessions} onReplay={openReplay} />
+    if (tab === 'errors')   return <ErrorList errors={errors} />
   }
 
   return (
@@ -99,7 +103,7 @@ export function App() {
       </header>
 
       <nav className="tabs">
-        {(['heatmap', 'zones', 'sessions'] as Tab[]).map(t => (
+        {(['heatmap', 'zones', 'sessions', 'errors'] as Tab[]).map(t => (
           <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => handleTabChange(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>

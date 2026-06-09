@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneStat, SessionStat, RawEvent } from './types'
+import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup } from './types'
 
 type TursoArg = { type: 'text' | 'integer' | 'real' | 'null'; value: string | null }
 type TursoReq = { type: 'execute'; stmt: { sql: string; args?: TursoArg[] } } | { type: 'close' }
@@ -127,11 +127,118 @@ export class ProcessorTurso {
     ])
   }
 
+  // ── Error groups ─────────────────────────────────────────────────────────────
+
+  async upsertErrorGroups(groups: Map<string, ErrorGroup>): Promise<void> {
+    if (groups.size === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = []
+    for (const g of groups.values()) {
+      stmts.push({
+        type: 'execute',
+        stmt: {
+          sql: `INSERT INTO error_groups
+                  (fingerprint, site, message, event_type, source, stack, count, sessions, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (site, fingerprint) DO UPDATE SET
+                  count      = count + excluded.count,
+                  sessions   = sessions + excluded.sessions,
+                  last_seen  = MAX(last_seen, excluded.last_seen)`,
+          args: [
+            str(g.fingerprint), str(g.site), str(g.message), str(g.eventType),
+            g.source ? str(g.source) : { type: 'null', value: null },
+            g.stack  ? str(g.stack)  : { type: 'null', value: null },
+            int(g.count), int(g.sessions.size),
+            int(g.firstSeen), int(g.lastSeen),
+          ],
+        },
+      })
+    }
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Alert state ──────────────────────────────────────────────────────────────
+
+  async getAlertState(site: string, alertType: string): Promise<number> {
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  'SELECT last_fired FROM alert_state WHERE site = ? AND alert_type = ?',
+        args: [str(site), str(alertType)],
+      }},
+      { type: 'close' },
+    ])
+    const rows = this._scalarRows<string>(res[0], 'last_fired')
+    return rows.length > 0 ? parseInt(rows[0]) : 0
+  }
+
+  async setAlertFired(site: string, alertType: string, ts: number): Promise<void> {
+    await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  `INSERT INTO alert_state (site, alert_type, last_fired) VALUES (?, ?, ?)
+               ON CONFLICT (site, alert_type) DO UPDATE SET last_fired = excluded.last_fired`,
+        args: [str(site), str(alertType), int(ts)],
+      }},
+      { type: 'close' },
+    ])
+  }
+
+  async incrementMissedBatches(site: string): Promise<number> {
+    await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  `INSERT INTO alert_state (site, alert_type, last_fired, missed_batches) VALUES (?, 'traffic_drop', 0, 1)
+               ON CONFLICT (site, alert_type) DO UPDATE SET missed_batches = missed_batches + 1`,
+        args: [str(site)],
+      }},
+      { type: 'close' },
+    ])
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  'SELECT missed_batches FROM alert_state WHERE site = ? AND alert_type = ?',
+        args: [str(site), str('traffic_drop')],
+      }},
+      { type: 'close' },
+    ])
+    const rows = this._scalarRows<string>(res[0], 'missed_batches')
+    return rows.length > 0 ? parseInt(rows[0]) : 1
+  }
+
+  async resetMissedBatches(site: string): Promise<void> {
+    await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  `INSERT INTO alert_state (site, alert_type, last_fired, missed_batches) VALUES (?, 'traffic_drop', 0, 0)
+               ON CONFLICT (site, alert_type) DO UPDATE SET missed_batches = 0`,
+        args: [str(site)],
+      }},
+      { type: 'close' },
+    ])
+  }
+
+  // ── Checkpoints ──────────────────────────────────────────────────────────────
+
   async ensureSchema(): Promise<void> {
     await this._pipeline([
       { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS processor_checkpoints (
         site   TEXT PRIMARY KEY,
         last_t INTEGER NOT NULL DEFAULT 0
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_groups (
+        fingerprint TEXT NOT NULL,
+        site        TEXT NOT NULL,
+        message     TEXT NOT NULL,
+        event_type  TEXT NOT NULL DEFAULT 'js_error',
+        source      TEXT,
+        stack       TEXT,
+        count       INTEGER NOT NULL DEFAULT 1,
+        sessions    INTEGER NOT NULL DEFAULT 1,
+        first_seen  INTEGER NOT NULL,
+        last_seen   INTEGER NOT NULL,
+        PRIMARY KEY (site, fingerprint)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_state (
+        site           TEXT NOT NULL,
+        alert_type     TEXT NOT NULL,
+        last_fired     INTEGER NOT NULL DEFAULT 0,
+        missed_batches INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, alert_type)
       )` }},
       { type: 'close' },
     ])

@@ -41,6 +41,19 @@ export interface SessionRow {
 
 export interface ReplayEvent { t: number; type: string; [k: string]: unknown }
 
+export interface ErrorGroupRow {
+  fingerprint: string
+  site: string
+  message: string
+  eventType: string
+  source: string | null
+  stack: string | null
+  count: number
+  sessions: number
+  firstSeen: number
+  lastSeen: number
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -103,6 +116,39 @@ export class QueryTurso {
       started: parseInt(r.started!), ended: parseInt(r.ended!), duration: parseInt(r.duration!),
       urlCount: parseInt(r.url_count!), eventCount: parseInt(r.event_count!),
       hasReplay: r.has_replay === '1',
+    }))
+  }
+
+  async getErrorGroups(
+    site: string,
+    opts: { from?: number; to?: number; limit?: number } = {},
+  ): Promise<ErrorGroupRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (opts.from !== undefined) { conds.push('last_seen >= ?'); args.push(int(opts.from)) }
+    if (opts.to   !== undefined) { conds.push('first_seen <= ?'); args.push(int(opts.to))  }
+
+    const limit = Math.min(opts.limit ?? 100, 500)
+    const sql = `SELECT fingerprint, site, message, event_type, source, stack,
+                        count, sessions, first_seen, last_seen
+                 FROM error_groups
+                 WHERE ${conds.join(' AND ')}
+                 ORDER BY count DESC
+                 LIMIT ?`
+    args.push(int(limit))
+
+    const rows = await this._query(sql, args)
+    return rows.map(r => ({
+      fingerprint: r.fingerprint!,
+      site:        r.site!,
+      message:     r.message!,
+      eventType:   r.event_type!,
+      source:      r.source ?? null,
+      stack:       r.stack  ?? null,
+      count:       parseInt(r.count!),
+      sessions:    parseInt(r.sessions!),
+      firstSeen:   parseInt(r.first_seen!),
+      lastSeen:    parseInt(r.last_seen!),
     }))
   }
 
