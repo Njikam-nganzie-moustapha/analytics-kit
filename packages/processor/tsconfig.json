@@ -6,7 +6,8 @@
     "lib": ["ESNext", "DOM"],
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["bun-types"]
   },
   "include": ["src/**/*.ts"]
 }

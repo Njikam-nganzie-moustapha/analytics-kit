@@ -20,8 +20,15 @@ async function tick(): Promise<void> {
   }
 }
 
-// Ensure schema then start loop
+// Ensure schema then start loop (or run once if --once flag passed)
 await db.ensureSchema()
-console.log(`[processor] running every ${INTERVAL_MS / 1000}s`)
-await tick()
-setInterval(tick, INTERVAL_MS)
+
+if (process.argv.includes('--once')) {
+  console.log('[processor] --once mode: running single pass')
+  await tick()
+  process.exit(0)
+} else {
+  console.log(`[processor] running every ${INTERVAL_MS / 1000}s`)
+  await tick()
+  setInterval(tick, INTERVAL_MS)
+}
