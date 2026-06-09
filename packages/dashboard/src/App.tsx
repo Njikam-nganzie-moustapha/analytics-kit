@@ -4,12 +4,35 @@ import { ZoneStats      } from './components/ZoneStats'
 import { SessionList    } from './components/SessionList'
 import { ErrorList      } from './components/ErrorList'
 import { ReplayModal    } from './components/ReplayModal'
-import { fetchHeatmap, fetchZones, fetchSessions, fetchReplay, fetchErrors } from './api'
+import { LoginScreen    } from './components/LoginScreen'
+import { fetchHeatmap, fetchZones, fetchSessions, fetchReplay, fetchErrors, authStatus, clearToken, getToken } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup } from './types'
 
 type Tab = 'heatmap' | 'zones' | 'sessions' | 'errors'
 
 export function App() {
+  const [authChecked,    setAuthChecked]    = useState(false)
+  const [authRequired,   setAuthRequired]   = useState(false)
+  const [authenticated,  setAuthenticated]  = useState(false)
+
+  // Check auth requirement once on mount
+  useEffect(() => {
+    authStatus().then(({ required }) => {
+      setAuthRequired(required)
+      // Already have a token stored → treat as authenticated until a 401 proves otherwise
+      setAuthenticated(!required || getToken() !== '')
+      setAuthChecked(true)
+    }).catch(() => {
+      // Can't reach query-api at all — skip auth gate, show error at data-load time
+      setAuthChecked(true)
+    })
+  }, [])
+
+  function handleLogout() {
+    clearToken()
+    setAuthenticated(false)
+  }
+
   const [siteInput, setSiteInput] = useState('')
   const [urlInput,  setUrlInput]  = useState('')
   const [tab,  setTab]  = useState<Tab>('heatmap')
@@ -46,7 +69,11 @@ export function App() {
       if (t === 'zones')    setZones(await fetchZones(q.site, q.url || undefined))
       if (t === 'sessions') setSessions(await fetchSessions(q.site, { limit: 200 }))
       if (t === 'errors')   setErrors(await fetchErrors(q.site, { limit: 200 }))
-    } catch (e) {
+    } catch (e: unknown) {
+      if ((e as { status?: number }).status === 401) {
+        setAuthenticated(false)
+        return
+      }
       setError(String(e))
     } finally {
       setLoading(false)
@@ -77,6 +104,12 @@ export function App() {
     if (tab === 'errors')   return <ErrorList errors={errors} />
   }
 
+  if (!authChecked) return null
+
+  if (authRequired && !authenticated) {
+    return <LoginScreen onSuccess={() => setAuthenticated(true)} />
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -99,6 +132,11 @@ export function App() {
           <button className="btn" onClick={handleLoad} disabled={!siteInput.trim() || loading}>
             Load
           </button>
+          {authRequired && (
+            <button className="btn btn-ghost" onClick={handleLogout} title="Sign out">
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
