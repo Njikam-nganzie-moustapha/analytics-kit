@@ -1,0 +1,15 @@
+{
+  "name": "@analytics-kit/processor",
+  "version": "0.1.0",
+  "description": "Aggregate processor — heatmap cells, zone stats, session summaries",
+  "type": "module",
+  "scripts": {
+    "dev":       "bun run --watch src/index.ts",
+    "start":     "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.4.0"
+  }
+}

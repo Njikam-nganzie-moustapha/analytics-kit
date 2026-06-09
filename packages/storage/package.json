@@ -1,0 +1,17 @@
+{
+  "name": "@analytics-kit/storage",
+  "version": "0.1.0",
+  "description": "Pluggable storage adapters — Turso, Telegram, Composite",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

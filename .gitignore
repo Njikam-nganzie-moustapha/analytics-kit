@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+dist/
+.turbo/
+*.local
+.DS_Store
+bun.lockb

@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/heatmapoverlay.tsx","./src/components/replaymodal.tsx","./src/components/sessionlist.tsx","./src/components/sessionstable.tsx","./src/components/zonestats.tsx","./src/components/zonestable.tsx","./vite.config.ts"],"version":"5.9.3"}

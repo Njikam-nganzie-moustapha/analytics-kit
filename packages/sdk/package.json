@@ -1,0 +1,23 @@
+{
+  "name": "@analytics-kit/sdk",
+  "version": "0.1.0",
+  "description": "Lightweight analytics SDK — mouse tracking, zones, errors, vitals, session replay",
+  "main": "dist/tracker.esm.js",
+  "module": "dist/tracker.esm.js",
+  "browser": "dist/tracker.min.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch --dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lz-string": "^1.5.0",
+    "rrweb": "^2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}

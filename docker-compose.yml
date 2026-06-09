@@ -1,0 +1,130 @@
+### Analytics Kit — production stack
+###
+### Modes
+###   Default (Turso cloud):   docker compose up -d
+###   ClickHouse (self-hosted): docker compose --profile clickhouse up -d
+###                             + set STORAGE_BACKEND=clickhouse in .env
+###
+### Required env: see .env.example
+
+services:
+
+  # ── Event ingestion ──────────────────────────────────────────────────────
+
+  collector:
+    build:
+      context:    .
+      dockerfile: packages/collector/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${COLLECTOR_PORT:-4210}:4210"
+    environment:
+      PORT:                 "4210"
+      NODE_ENV:             production
+      STORAGE_BACKEND:      ${STORAGE_BACKEND:-turso}
+      # Turso (default backend)
+      TURSO_URL:            ${TURSO_URL:-}
+      TURSO_TOKEN:          ${TURSO_TOKEN:-}
+      # ClickHouse (--profile clickhouse)
+      CLICKHOUSE_URL:       http://clickhouse:8123
+      CLICKHOUSE_DB:        ${CLICKHOUSE_DB:-analytics}
+      CLICKHOUSE_USER:      ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD:  ${CLICKHOUSE_PASSWORD:-}
+      # Collector options
+      SITE_KEYS:            ${SITE_KEYS}
+      CORS_ORIGINS:         ${CORS_ORIGINS:-*}
+      FLUSH_INTERVAL_MS:    ${FLUSH_INTERVAL_MS:-5000}
+      MAX_QUEUE_SIZE:       ${MAX_QUEUE_SIZE:-1000}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        required:  false
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:4210/health"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+
+  # ── Aggregate processor ──────────────────────────────────────────────────
+
+  processor:
+    build:
+      context:    .
+      dockerfile: packages/processor/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV:              production
+      TURSO_URL:             ${TURSO_URL}
+      TURSO_TOKEN:           ${TURSO_TOKEN}
+      PROCESSOR_INTERVAL_MS: ${PROCESSOR_INTERVAL_MS:-30000}
+    depends_on:
+      collector:
+        condition: service_healthy
+
+  # ── Query API ────────────────────────────────────────────────────────────
+
+  query-api:
+    build:
+      context:    .
+      dockerfile: packages/query-api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${QUERY_API_PORT:-4211}:4211"
+    environment:
+      PORT:          "4211"
+      NODE_ENV:      production
+      TURSO_URL:     ${TURSO_URL}
+      TURSO_TOKEN:   ${TURSO_TOKEN}
+      QUERY_API_KEY: ${QUERY_API_KEY:-}
+      CORS_ORIGINS:  ${CORS_ORIGINS:-*}
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:4211/health"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+
+  # ── Dashboard ────────────────────────────────────────────────────────────
+
+  dashboard:
+    build:
+      context:    .
+      dockerfile: packages/dashboard/Dockerfile
+      args:
+        # Relative /api works when dashboard + query-api are behind the same
+        # reverse proxy (recommended). Set to absolute URL for split deploys.
+        VITE_QUERY_API_URL: ${VITE_QUERY_API_URL:-/api}
+        VITE_API_KEY:       ${QUERY_API_KEY:-}
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-4212}:80"
+    depends_on:
+      query-api:
+        condition: service_healthy
+
+  # ── ClickHouse (optional — --profile clickhouse) ─────────────────────────
+
+  clickhouse:
+    image:    clickhouse/clickhouse-server:24-alpine
+    profiles: [clickhouse]
+    restart:  unless-stopped
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    environment:
+      CLICKHOUSE_DB:       ${CLICKHOUSE_DB:-analytics}
+      CLICKHOUSE_USER:     ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    ports:
+      - "8123:8123"   # HTTP API
+      - "9000:9000"   # native protocol (optional)
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
