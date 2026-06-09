@@ -16,6 +16,8 @@ services:
       context:    .
       dockerfile: packages/collector/Dockerfile
     restart: unless-stopped
+    # Port exposed for direct SDK use or debugging.
+    # When the SDK points to the dashboard origin (/e), this can be removed.
     ports:
       - "${COLLECTOR_PORT:-4210}:4210"
     environment:
@@ -68,6 +70,8 @@ services:
       context:    .
       dockerfile: packages/query-api/Dockerfile
     restart: unless-stopped
+    # Port exposed for debugging. In production, all traffic goes through the
+    # dashboard nginx proxy (/api/*) — this port can be removed or firewalled.
     ports:
       - "${QUERY_API_PORT:-4211}:4211"
     environment:
@@ -90,8 +94,8 @@ services:
       context:    .
       dockerfile: packages/dashboard/Dockerfile
       args:
-        # Relative /api works when dashboard + query-api are behind the same
-        # reverse proxy (recommended). Set to absolute URL for split deploys.
+        # /api is proxied to query-api by the dashboard nginx (same origin — no CORS).
+        # Override with an absolute URL only for split-origin deploys.
         VITE_QUERY_API_URL: ${VITE_QUERY_API_URL:-/api}
         VITE_API_KEY:       ${QUERY_API_KEY:-}
     restart: unless-stopped
@@ -99,6 +103,8 @@ services:
       - "${DASHBOARD_PORT:-4212}:80"
     depends_on:
       query-api:
+        condition: service_healthy
+      collector:
         condition: service_healthy
 
   # ── ClickHouse (optional — --profile clickhouse) ─────────────────────────
