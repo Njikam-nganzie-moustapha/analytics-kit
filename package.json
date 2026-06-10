@@ -4,15 +4,19 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "build:sdk":       "npm run build --workspace=packages/sdk",
-    "dev:sdk":         "npm run dev   --workspace=packages/sdk",
-    "dev:collector":   "npm run dev   --workspace=packages/collector",
-    "start:collector": "npm run start --workspace=packages/collector",
-    "dev:query-api":   "npm run dev   --workspace=packages/query-api",
-    "start:query-api": "npm run start --workspace=packages/query-api",
-    "dev:dashboard":   "npm run dev   --workspace=packages/dashboard",
-    "build:dashboard": "npm run build --workspace=packages/dashboard",
-    "typecheck":       "npm run typecheck --workspaces --if-present"
+    "build:sdk":         "npm run build --workspace=packages/sdk",
+    "dev:sdk":           "npm run dev   --workspace=packages/sdk",
+    "dev:collector":     "npm run dev   --workspace=packages/collector",
+    "start:collector":   "npm run start --workspace=packages/collector",
+    "dev:query-api":     "npm run dev   --workspace=packages/query-api",
+    "start:query-api":   "npm run start --workspace=packages/query-api",
+    "dev:dashboard":     "npm run dev   --workspace=packages/dashboard",
+    "build:dashboard":   "npm run build --workspace=packages/dashboard",
+    "typecheck":         "npm run typecheck --workspaces --if-present",
+    "test":              "bun test packages/processor/src packages/collector/src packages/query-api/src",
+    "test:processor":    "bun test packages/processor/src --reporter=dot",
+    "test:collector":    "bun test packages/collector/src --reporter=dot",
+    "test:query-api":    "bun test packages/query-api/src --reporter=dot"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

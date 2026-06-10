@@ -42,6 +42,7 @@ export interface TrackerConfig {
   collectorUrl: string
   zones?: ZoneDef[]
   userId?: string
+  release?: string          // version deployée, ex: "1.4.2" ou commit SHA
   replay?: boolean          // default: true
   compress?: boolean        // default: true
   flushInterval?: number    // ms, default: 2000

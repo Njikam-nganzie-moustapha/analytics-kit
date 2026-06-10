@@ -6,6 +6,7 @@ import { startErrorTracking, stopErrorTracking } from './errors'
 import { startVitalsTracking } from './vitals'
 import { startRageTracking } from './rage'
 import { startRecorder, stopRecorder } from './recorder'
+import { addBreadcrumb, clearBreadcrumbs } from './breadcrumbs'
 
 let _transport: Transport | null = null
 let _config: TrackerConfig | null = null
@@ -48,6 +49,7 @@ export function init(cfg: TrackerConfig): void {
   })
 
   // Page view initial
+  addBreadcrumb({ category: 'navigation', message: location.href })
   push({ type: 'page_view', url: location.href, referrer: document.referrer })
 
   // SPA navigation — écoute pushState/replaceState
@@ -67,13 +69,12 @@ export function init(cfg: TrackerConfig): void {
 export function makePush(): PushFn {
   return function push(partial) {
     if (!_transport || !_config) return
-    // `partial` contient toujours `type` (garanti par PushFn)
-    // L'assertion est nécessaire car TS perd le type à travers l'index signature [key:string]
     const event = {
       t: Date.now(),
       sid: _sessionId,
       site: _config.siteId,
       uid: _config.userId,
+      release: _config.release,
       url: location.href,   // captured at push time — correct for SPA
       ...partial,           // caller's url overrides (e.g. page_view passes its own)
     } as unknown as AnalyticsEvent
@@ -96,6 +97,7 @@ export function destroy(): void {
   stopMouseTracking()
   stopErrorTracking()
   stopRecorder()
+  clearBreadcrumbs()
   _transport?.destroy()
   _transport = null
   _initialized = false
@@ -106,9 +108,13 @@ function patchHistory(push: PushFn): void {
   const wrap = (orig: typeof history.pushState) =>
     function (this: History, ...args: Parameters<typeof history.pushState>) {
       orig.apply(this, args)
+      addBreadcrumb({ category: 'navigation', message: location.href })
       push({ type: 'page_view', url: location.href })
     }
   history.pushState = wrap(history.pushState)
   history.replaceState = wrap(history.replaceState)
-  window.addEventListener('popstate', () => push({ type: 'page_view', url: location.href }))
+  window.addEventListener('popstate', () => {
+    addBreadcrumb({ category: 'navigation', message: location.href })
+    push({ type: 'page_view', url: location.href })
+  })
 }

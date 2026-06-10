@@ -4,6 +4,9 @@ import type { Queue } from '../queue/types'
 import { auth } from '../middleware/auth'
 import { rateLimit } from '../middleware/ratelimit'
 import { maybeDecompress } from '../decompress'
+import { isBotUA, isFilteredEvent } from '../middleware/filter'
+
+const MAX_EVENTS_PER_BATCH = 200
 
 function isValidEvent(e: unknown): e is AnalyticsEvent {
   if (!e || typeof e !== 'object') return false
@@ -20,6 +23,10 @@ export function eventsRouter(queue: Queue): Hono {
   // POST /e — main ingest endpoint
   // Body: JSON array | compressed string (X-Compressed: 1)
   r.post('/', async c => {
+    // Drop bot traffic at request level (before parsing body)
+    const ua = c.req.header('user-agent') ?? ''
+    if (isBotUA(ua)) return c.body(null, 204)
+
     try {
       const compressed = c.req.header('x-compressed') === '1'
       const ct = c.req.header('content-type') ?? ''
@@ -35,7 +42,11 @@ export function eventsRouter(queue: Queue): Hono {
         events = Array.isArray(parsed) ? parsed : [parsed]
       }
 
-      const valid = events.filter(isValidEvent)
+      const valid = events
+        .slice(0, MAX_EVENTS_PER_BATCH)
+        .filter(isValidEvent)
+        .filter(e => !isFilteredEvent(e))  // drop extension errors etc.
+
       if (valid.length === 0) return c.body(null, 204)
 
       await queue.push(valid)

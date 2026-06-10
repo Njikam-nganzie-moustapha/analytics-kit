@@ -36,7 +36,7 @@ export class ProcessorTurso {
 
   async upsertHeatmapCells(cells: HeatmapCell[]): Promise<void> {
     if (cells.length === 0) return
-    const stmts: Extract<TursoReq, { type: 'execute' }>[] =cells.map(c => ({
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = cells.map(c => ({
       type: 'execute',
       stmt: {
         sql: `INSERT INTO heatmap_cells (site, url, gx, gy, count, updated)
@@ -54,7 +54,7 @@ export class ProcessorTurso {
 
   async upsertZoneStats(stats: ZoneStat[]): Promise<void> {
     if (stats.length === 0) return
-    const stmts: Extract<TursoReq, { type: 'execute' }>[] =stats.map(s => ({
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = stats.map(s => ({
       type: 'execute',
       stmt: {
         sql: `INSERT INTO zone_stats (site, zone_id, url, enters, clicks, avg_dwell, updated)
@@ -81,7 +81,7 @@ export class ProcessorTurso {
 
   async upsertSessions(stats: SessionStat[]): Promise<void> {
     if (stats.length === 0) return
-    const stmts: Extract<TursoReq, { type: 'execute' }>[] =stats.map(s => ({
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = stats.map(s => ({
       type: 'execute',
       stmt: {
         sql: `INSERT INTO sessions (sid, site, uid, started, ended, duration, url_count, event_count, has_replay)
@@ -133,20 +133,25 @@ export class ProcessorTurso {
     if (groups.size === 0) return
     const stmts: Extract<TursoReq, { type: 'execute' }>[] = []
     for (const g of groups.values()) {
+      const crumbsJson = g.breadcrumbs ? JSON.stringify(g.breadcrumbs) : null
       stmts.push({
         type: 'execute',
         stmt: {
           sql: `INSERT INTO error_groups
-                  (fingerprint, site, message, event_type, source, stack, count, sessions, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (fingerprint, site, message, event_type, source, stack, release, breadcrumbs, count, sessions, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (site, fingerprint) DO UPDATE SET
-                  count      = count + excluded.count,
-                  sessions   = sessions + excluded.sessions,
-                  last_seen  = MAX(last_seen, excluded.last_seen)`,
+                  count       = count + excluded.count,
+                  sessions    = sessions + excluded.sessions,
+                  last_seen   = MAX(last_seen, excluded.last_seen),
+                  release     = COALESCE(excluded.release, release),
+                  breadcrumbs = COALESCE(excluded.breadcrumbs, breadcrumbs)`,
           args: [
             str(g.fingerprint), str(g.site), str(g.message), str(g.eventType),
             g.source ? str(g.source) : { type: 'null', value: null },
             g.stack  ? str(g.stack)  : { type: 'null', value: null },
+            g.release ? str(g.release) : { type: 'null', value: null },
+            crumbsJson ? str(crumbsJson) : { type: 'null', value: null },
             int(g.count), int(g.sessions.size),
             int(g.firstSeen), int(g.lastSeen),
           ],
@@ -154,6 +159,34 @@ export class ProcessorTurso {
       })
     }
     await this._batchedUpsert(stmts)
+  }
+
+  // ── Regression detection ─────────────────────────────────────────────────────
+  // If a 'resolved' error gets new events, flip it to 'regressed'
+
+  async markRegressed(site: string, fingerprints: string[]): Promise<string[]> {
+    if (fingerprints.length === 0) return []
+    const placeholders = fingerprints.map(() => '?').join(', ')
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql: `SELECT fingerprint FROM error_states
+              WHERE site = ? AND status = 'resolved' AND fingerprint IN (${placeholders})`,
+        args: [str(site), ...fingerprints.map(str)],
+      }},
+      { type: 'close' },
+    ])
+    const regressed = this._scalarRows<string>(res[0], 'fingerprint')
+    if (regressed.length === 0) return []
+
+    const updateStmts: Extract<TursoReq, { type: 'execute' }>[] = regressed.map(fp => ({
+      type: 'execute',
+      stmt: {
+        sql: `UPDATE error_states SET status = 'regressed', updated_at = ? WHERE site = ? AND fingerprint = ?`,
+        args: [int(Date.now()), str(site), str(fp)],
+      },
+    }))
+    await this._batchedUpsert(updateStmts)
+    return regressed
   }
 
   // ── Alert state ──────────────────────────────────────────────────────────────
@@ -212,9 +245,10 @@ export class ProcessorTurso {
     ])
   }
 
-  // ── Checkpoints ──────────────────────────────────────────────────────────────
+  // ── Schema ───────────────────────────────────────────────────────────────────
 
   async ensureSchema(): Promise<void> {
+    // Core tables
     await this._pipeline([
       { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS processor_checkpoints (
         site   TEXT PRIMARY KEY,
@@ -227,10 +261,21 @@ export class ProcessorTurso {
         event_type  TEXT NOT NULL DEFAULT 'js_error',
         source      TEXT,
         stack       TEXT,
+        release     TEXT,
+        breadcrumbs TEXT,
         count       INTEGER NOT NULL DEFAULT 1,
         sessions    INTEGER NOT NULL DEFAULT 1,
         first_seen  INTEGER NOT NULL,
         last_seen   INTEGER NOT NULL,
+        PRIMARY KEY (site, fingerprint)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_states (
+        site        TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'open',
+        assignee    TEXT,
+        note        TEXT,
+        updated_at  INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (site, fingerprint)
       )` }},
       { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_state (
@@ -240,13 +285,28 @@ export class ProcessorTurso {
         missed_batches INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (site, alert_type)
       )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS cron_monitors (
+        monitor_id   TEXT NOT NULL,
+        site         TEXT NOT NULL,
+        interval_ms  INTEGER NOT NULL DEFAULT 300000,
+        grace_ms     INTEGER NOT NULL DEFAULT 60000,
+        last_checkin INTEGER,
+        PRIMARY KEY (monitor_id)
+      )` }},
       { type: 'close' },
     ])
+
+    // Migrations for existing error_groups table (ignore "duplicate column" errors)
+    for (const col of ['release TEXT', 'breadcrumbs TEXT']) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE error_groups ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* column already exists — fine */ })
+    }
   }
 
   // ── Internal ─────────────────────────────────────────────────────────────────
 
-  // Chunk execute-stmts into batches so a single pipeline call never exceeds ~100 stmts
   private async _batchedUpsert(stmts: Extract<TursoReq, { type: 'execute' }>[], batchSize = 100): Promise<void> {
     for (let i = 0; i < stmts.length; i += batchSize) {
       const batch: TursoReq[] = [...stmts.slice(i, i + batchSize), { type: 'close' }]

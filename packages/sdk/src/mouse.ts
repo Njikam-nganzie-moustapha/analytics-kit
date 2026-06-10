@@ -1,5 +1,6 @@
 import type { TrackerConfig, ZoneDef, PushFn } from './types'
 import { absPos, getSelector, debounce } from './utils'
+import { addBreadcrumb } from './breadcrumbs'
 
 interface ZoneState {
   def: ZoneDef
@@ -43,11 +44,13 @@ export function startMouseTracking(cfg: TrackerConfig, push: PushFn): void {
 
   document.addEventListener('click', (e) => {
     const pos = absPos(e)
+    const selector = getSelector(e.target as Element)
     const activeZones = zones.filter(z => z.active).map(z => z.def.id)
+    addBreadcrumb({ category: 'click', message: selector })
     push({
       type: 'click',
       ...pos,
-      target: getSelector(e.target as Element),
+      target: selector,
       ...(activeZones.length ? { zoneIds: activeZones } : {}),
     })
   })

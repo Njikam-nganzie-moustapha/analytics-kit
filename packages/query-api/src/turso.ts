@@ -48,10 +48,24 @@ export interface ErrorGroupRow {
   eventType: string
   source: string | null
   stack: string | null
+  release: string | null
+  breadcrumbs: string | null      // raw JSON string
   count: number
   sessions: number
   firstSeen: number
   lastSeen: number
+  // from error_states JOIN
+  status: string
+  assignee: string | null
+  note: string | null
+}
+
+export interface CronMonitorRow {
+  monitorId: string
+  site: string
+  intervalMs: number
+  graceMs: number
+  lastCheckin: number | null
 }
 
 // ── Client ────────────────────────────────────────────────────────────────────
@@ -121,19 +135,26 @@ export class QueryTurso {
 
   async getErrorGroups(
     site: string,
-    opts: { from?: number; to?: number; limit?: number } = {},
+    opts: { from?: number; to?: number; limit?: number; status?: string } = {},
   ): Promise<ErrorGroupRow[]> {
-    const conds = ['site = ?']
+    const conds = ['eg.site = ?']
     const args: TursoArg[] = [str(site)]
-    if (opts.from !== undefined) { conds.push('last_seen >= ?'); args.push(int(opts.from)) }
-    if (opts.to   !== undefined) { conds.push('first_seen <= ?'); args.push(int(opts.to))  }
+    if (opts.from   !== undefined) { conds.push('eg.last_seen >= ?');   args.push(int(opts.from)) }
+    if (opts.to     !== undefined) { conds.push('eg.first_seen <= ?');  args.push(int(opts.to))   }
+    if (opts.status !== undefined) { conds.push('COALESCE(es.status, \'open\') = ?'); args.push(str(opts.status)) }
 
     const limit = Math.min(opts.limit ?? 100, 500)
-    const sql = `SELECT fingerprint, site, message, event_type, source, stack,
-                        count, sessions, first_seen, last_seen
-                 FROM error_groups
+    const sql = `SELECT
+                   eg.fingerprint, eg.site, eg.message, eg.event_type,
+                   eg.source, eg.stack, eg.release, eg.breadcrumbs,
+                   eg.count, eg.sessions, eg.first_seen, eg.last_seen,
+                   COALESCE(es.status, 'open') AS status,
+                   es.assignee, es.note
+                 FROM error_groups eg
+                 LEFT JOIN error_states es
+                   ON es.site = eg.site AND es.fingerprint = eg.fingerprint
                  WHERE ${conds.join(' AND ')}
-                 ORDER BY count DESC
+                 ORDER BY eg.count DESC
                  LIMIT ?`
     args.push(int(limit))
 
@@ -145,11 +166,83 @@ export class QueryTurso {
       eventType:   r.event_type!,
       source:      r.source ?? null,
       stack:       r.stack  ?? null,
+      release:     r.release ?? null,
+      breadcrumbs: r.breadcrumbs ?? null,
       count:       parseInt(r.count!),
       sessions:    parseInt(r.sessions!),
       firstSeen:   parseInt(r.first_seen!),
       lastSeen:    parseInt(r.last_seen!),
+      status:      r.status ?? 'open',
+      assignee:    r.assignee ?? null,
+      note:        r.note ?? null,
     }))
+  }
+
+  async updateErrorState(
+    site: string,
+    fingerprint: string,
+    update: { status?: string; assignee?: string; note?: string },
+  ): Promise<void> {
+    const now = int(Date.now())
+    const nullArg: TursoArg = { type: 'null', value: null }
+
+    // Build dynamic SET clause for ON CONFLICT branch
+    const setClauses: string[] = ['updated_at = ?']
+    const setArgs: TursoArg[]  = [now]
+    if (update.status   !== undefined) { setClauses.push('status = ?');   setArgs.push(str(update.status)) }
+    if (update.assignee !== undefined) { setClauses.push('assignee = ?'); setArgs.push(str(update.assignee)) }
+    if (update.note     !== undefined) { setClauses.push('note = ?');     setArgs.push(str(update.note)) }
+
+    // INSERT args (positional): site, fingerprint, status, assignee, note, updated_at
+    const insertArgs: TursoArg[] = [
+      str(site), str(fingerprint),
+      str(update.status ?? 'open'),
+      update.assignee !== undefined ? str(update.assignee) : nullArg,
+      update.note     !== undefined ? str(update.note)     : nullArg,
+      now,
+    ]
+
+    await this._execute(
+      `INSERT INTO error_states (site, fingerprint, status, assignee, note, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (site, fingerprint) DO UPDATE SET ${setClauses.join(', ')}`,
+      [...insertArgs, ...setArgs],
+    )
+  }
+
+  // ── CRON monitors ─────────────────────────────────────────────────────────────
+
+  async upsertCronCheckin(monitorId: string, site: string, intervalMs: number, graceMs: number): Promise<void> {
+    await this._execute(
+      `INSERT INTO cron_monitors (monitor_id, site, interval_ms, grace_ms, last_checkin)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (monitor_id) DO UPDATE SET
+         last_checkin = excluded.last_checkin,
+         interval_ms  = excluded.interval_ms,
+         grace_ms     = excluded.grace_ms`,
+      [str(monitorId), str(site), int(intervalMs), int(graceMs), int(Date.now())],
+    )
+  }
+
+  async getCronMonitors(site: string): Promise<CronMonitorRow[]> {
+    const rows = await this._query(
+      'SELECT monitor_id, site, interval_ms, grace_ms, last_checkin FROM cron_monitors WHERE site = ?',
+      [str(site)],
+    )
+    return rows.map(r => ({
+      monitorId:   r.monitor_id!,
+      site:        r.site!,
+      intervalMs:  parseInt(r.interval_ms!),
+      graceMs:     parseInt(r.grace_ms!),
+      lastCheckin: r.last_checkin != null ? parseInt(r.last_checkin) : null,
+    }))
+  }
+
+  async deleteCronMonitor(monitorId: string, site: string): Promise<void> {
+    await this._execute(
+      'DELETE FROM cron_monitors WHERE monitor_id = ? AND site = ?',
+      [str(monitorId), str(site)],
+    )
   }
 
   async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
@@ -163,13 +256,50 @@ export class QueryTurso {
       if (!r.payload) return []
       try {
         const outer = JSON.parse(r.payload) as Record<string, unknown>
-        // Unwrap inner rrweb event from analytics envelope { type:'rrweb_chunk', payload: <rrweb_event> }
         return [(outer.payload ?? outer) as ReplayEvent]
       } catch { return [] }
     })
   }
 
+  // ── Schema (idempotent) ───────────────────────────────────────────────────────
+
+  async ensureSchema(): Promise<void> {
+    const stmts: TursoReq[] = [
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_states (
+          site        TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'open',
+          assignee    TEXT,
+          note        TEXT,
+          updated_at  INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, fingerprint)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS cron_monitors (
+          monitor_id   TEXT NOT NULL,
+          site         TEXT NOT NULL,
+          interval_ms  INTEGER NOT NULL DEFAULT 300000,
+          grace_ms     INTEGER NOT NULL DEFAULT 60000,
+          last_checkin INTEGER,
+          PRIMARY KEY (monitor_id)
+        )` }},
+      { type: 'close' },
+    ]
+    await this._pipeline(stmts)
+
+    // Migrations for error_groups columns that may not exist yet
+    for (const col of ['release TEXT', 'breadcrumbs TEXT']) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE error_groups ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* column already exists */ })
+    }
+  }
+
   // ── Internal ──────────────────────────────────────────────────────────────
+
+  private async _execute(sql: string, args: TursoArg[]): Promise<void> {
+    await this._pipeline([{ type: 'execute', stmt: { sql, args } }, { type: 'close' }])
+  }
 
   private async _query(sql: string, args: TursoArg[]): Promise<Record<string, string | null>[]> {
     const reqs: TursoReq[] = [{ type: 'execute', stmt: { sql, args } }, { type: 'close' }]
@@ -181,5 +311,16 @@ export class QueryTurso {
     if (!res.ok) throw new Error(`Turso ${res.status}: ${await res.text()}`)
     const data = await res.json() as { results: unknown[] }
     return toRows(data.results[0])
+  }
+
+  private async _pipeline(requests: TursoReq[]): Promise<unknown[]> {
+    const res = await fetch(`${this.url}/v2/pipeline`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ requests }),
+    })
+    if (!res.ok) throw new Error(`Turso ${res.status}: ${await res.text()}`)
+    const data = await res.json() as { results: unknown[] }
+    return data.results
   }
 }

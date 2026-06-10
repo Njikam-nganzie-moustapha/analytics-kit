@@ -1,21 +1,22 @@
 import { useState } from 'react'
+import { motion } from 'framer-motion'
+import { AnimatedNumber } from './AnimatedNumber'
 import type { SessionRow } from '../types'
 
 type SortKey = 'started' | 'duration' | 'urlCount' | 'eventCount'
-type Dir = 'desc' | 'asc'
+type Dir     = 'desc' | 'asc'
 
 interface Props {
-  sessions: SessionRow[]
+  sessions:  SessionRow[]
   onReplay?: (sid: string) => void
 }
 
 function timeAgo(ms: number): string {
-  const diff = Date.now() - ms
-  const m = Math.floor(diff / 60_000)
-  if (m < 1)   return 'just now'
-  if (m < 60)  return `${m}m ago`
+  const m = Math.floor((Date.now() - ms) / 60_000)
+  if (m < 1)  return 'just now'
+  if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60)
-  if (h < 24)  return `${h}h ago`
+  if (h < 24) return `${h}h ago`
   return `${Math.floor(h / 24)}d ago`
 }
 
@@ -26,12 +27,28 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+const tbody = {
+  hidden: {},
+  show:   { transition: { staggerChildren: 0.03, delayChildren: 0.05 } },
+}
+const row = {
+  hidden: { opacity: 0, y: 6 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.2, ease: 'easeOut' } },
+}
+
 export function SessionList({ sessions, onReplay }: Props) {
-  const [sortKey, setSortKey] = useState<SortKey>('started')
-  const [dir, setDir]         = useState<Dir>('desc')
+  const [sortKey,    setSortKey]    = useState<SortKey>('started')
+  const [dir,        setDir]        = useState<Dir>('desc')
   const [replayOnly, setReplayOnly] = useState(false)
 
-  if (sessions.length === 0) return <div className="empty">No sessions found.</div>
+  if (sessions.length === 0) {
+    return (
+      <div className="empty">
+        <span className="empty-title">No sessions yet</span>
+        <span>Sessions appear as visitors browse your site.</span>
+      </div>
+    )
+  }
 
   function toggleSort(k: SortKey) {
     if (k === sortKey) setDir(d => d === 'desc' ? 'asc' : 'desc')
@@ -44,7 +61,7 @@ export function SessionList({ sessions, onReplay }: Props) {
     return (a[sortKey] - b[sortKey]) * sign
   })
 
-  const withReplay = sessions.filter(s => s.hasReplay).length
+  const withReplay  = sessions.filter(s => s.hasReplay).length
   const avgDuration = sessions.length
     ? Math.round(sessions.reduce((s, r) => s + r.duration, 0) / sessions.length)
     : 0
@@ -56,8 +73,10 @@ export function SessionList({ sessions, onReplay }: Props) {
 
   function Th({ k, label, right }: { k: SortKey; label: string; right?: boolean }) {
     return (
-      <th className={`${k === sortKey ? 'sort-active' : ''} ${right ? 'col-r' : ''}`}
-          onClick={() => toggleSort(k)}>
+      <th
+        className={`${k === sortKey ? 'sort-active' : ''} ${right ? 'col-r' : ''}`}
+        onClick={() => toggleSort(k)}
+      >
         {label}{arrow(k)}
       </th>
     )
@@ -66,18 +85,37 @@ export function SessionList({ sessions, onReplay }: Props) {
   return (
     <div>
       <div className="stats-bar">
-        <div className="stat-card"><div className="stat-value">{sessions.length}</div><div className="stat-label">Sessions</div></div>
-        <div className="stat-card"><div className="stat-value">{withReplay}</div><div className="stat-label">With replay</div></div>
-        <div className="stat-card"><div className="stat-value">{fmtDuration(avgDuration)}</div><div className="stat-label">Avg duration</div></div>
+        {[
+          { label: 'Sessions',     value: sessions.length,     fmt: undefined },
+          { label: 'With replay',  value: withReplay,          fmt: undefined },
+          { label: 'Avg duration', value: avgDuration, fmt: (n: number) => fmtDuration(n) },
+        ].map((s, i) => (
+          <motion.div
+            key={s.label}
+            className="stat-card"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.07, duration: 0.3, ease: 'easeOut' }}
+          >
+            <div className="stat-value">
+              <AnimatedNumber value={s.value} format={s.fmt} />
+            </div>
+            <div className="stat-label">{s.label}</div>
+          </motion.div>
+        ))}
       </div>
 
-      <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={replayOnly} onChange={e => setReplayOnly(e.target.checked)} />
+      <div className="toolbar">
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={replayOnly}
+            onChange={e => setReplayOnly(e.target.checked)}
+          />
           Replay only
         </label>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          {sorted.length.toLocaleString()} shown
+        <span className="count-label">
+          {sorted.length.toLocaleString()} sessions
         </span>
       </div>
 
@@ -93,10 +131,12 @@ export function SessionList({ sessions, onReplay }: Props) {
               <th>Replay</th>
             </tr>
           </thead>
-          <tbody>
+          <motion.tbody variants={tbody} initial="hidden" animate="show">
             {sorted.map(s => (
-              <tr key={s.sid}>
-                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{s.sid.slice(0, 12)}…</td>
+              <motion.tr key={s.sid} variants={row}>
+                <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-2)' }}>
+                  {s.sid.slice(0, 10)}<span style={{ opacity: .4 }}>…</span>
+                </td>
                 <td title={new Date(s.started).toLocaleString()}>{timeAgo(s.started)}</td>
                 <td className="col-r">{fmtDuration(s.duration)}</td>
                 <td className="col-r">{s.urlCount}</td>
@@ -107,9 +147,9 @@ export function SessionList({ sessions, onReplay }: Props) {
                     : <span className="badge badge-gray">—</span>
                   }
                 </td>
-              </tr>
+              </motion.tr>
             ))}
-          </tbody>
+          </motion.tbody>
         </table>
       </div>
     </div>

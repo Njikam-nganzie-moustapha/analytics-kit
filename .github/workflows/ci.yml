@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Type checking ────────────────────────────────────────────────────────
+  typecheck:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: tsc — storage
+        run: bunx tsc --noEmit
+        working-directory: packages/storage
+
+      - name: tsc — collector
+        run: bunx tsc --noEmit
+        working-directory: packages/collector
+
+      - name: tsc — query-api
+        run: bunx tsc --noEmit
+        working-directory: packages/query-api
+
+      - name: tsc — processor
+        run: bunx tsc --noEmit
+        working-directory: packages/processor
+
+  # ── 2. Unit + integration tests ─────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Test — processor (pure aggregation logic)
+        run: bun test packages/processor/src --reporter=dot
+        env:
+          NODE_ENV: test
+
+      - name: Test — collector (queue + HTTP endpoints)
+        run: bun test packages/collector/src --reporter=dot
+        env:
+          NODE_ENV: test
+
+      - name: Test — query-api (HTTP endpoints + auth)
+        run: bun test packages/query-api/src --reporter=dot
+        env:
+          NODE_ENV: test
+
+  # ── 3. Dashboard build ──────────────────────────────────────────────────────
+  build-dashboard:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build SPA
+        run: npm run build --workspace=packages/dashboard
+        env:
+          VITE_QUERY_API_URL: https://analytics-query-lia.njikammoustapha67.workers.dev
+          VITE_API_KEY: placeholder-for-build
+
+  # ── 4. Worker bundle validation ─────────────────────────────────────────────
+  wrangler-validate:
+    name: Wrangler dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Validate collector worker bundle
+        run: bunx wrangler deploy --dry-run --outdir /tmp/collector-out
+        working-directory: packages/collector
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Validate query-api worker bundle
+        run: bunx wrangler deploy --dry-run --outdir /tmp/query-api-out
+        working-directory: packages/query-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -5,7 +5,7 @@ import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
 import { checkAlerts } from './alerts'
 
-const BATCH_LIMIT = 5_000   // events per run per site
+const BATCH_LIMIT = 5_000
 
 export async function runPipeline(db: ProcessorTurso): Promise<void> {
   const sites = await db.fetchDistinctSites()
@@ -19,7 +19,6 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
     const events      = await db.fetchEventsSince(site, checkpoint, BATCH_LIMIT)
 
     if (events.length === 0) {
-      // No new events — still check for traffic drop
       await checkAlerts(db, site, { newEvents: 0, errorGroups: new Map(), hasHistory }).catch(e =>
         console.error(`[processor] ${site} alert check failed:`, e),
       )
@@ -28,13 +27,11 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
 
     const maxT = Math.max(...events.map(e => e.t))
 
-    // Compute all aggregates
     const heatmapCells = buildHeatmapCells(events)
     const zoneStats    = buildZoneStats(events)
     const sessionStats = buildSessionStats(events)
     const errorGroups  = buildErrorGroups(events)
 
-    // Write to DB — each write is independent so one failure doesn't abort others
     await Promise.allSettled([
       db.upsertHeatmapCells(heatmapCells),
       db.upsertZoneStats(zoneStats),
@@ -49,9 +46,20 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
       })
     })
 
+    // Regression detection: if a 'resolved' error got new events → flip to 'regressed'
+    if (errorGroups.size > 0) {
+      const fps = [...errorGroups.keys()]
+      const regressed = await db.markRegressed(site, fps).catch(e => {
+        console.error(`[processor] ${site} regression check failed:`, e)
+        return [] as string[]
+      })
+      if (regressed.length > 0) {
+        console.log(`[processor] ${site}: ${regressed.length} error(s) regressed after resolution`)
+      }
+    }
+
     await db.saveCheckpoint(site, maxT)
 
-    // Check for spikes / anomalies — non-blocking
     await checkAlerts(db, site, { newEvents: events.length, errorGroups, hasHistory }).catch(e =>
       console.error(`[processor] ${site} alert check failed:`, e),
     )

@@ -28,7 +28,7 @@ function makeApp(env: Env) {
   app.get('/auth', c => c.json({ required: !!(env.DASHBOARD_PASSWORD && env.QUERY_API_KEY) }))
   app.post('/auth', async c => {
     if (!env.DASHBOARD_PASSWORD || !env.QUERY_API_KEY) return c.json({ token: null, required: false })
-    const body = await c.req.json<{ password?: string }>().catch(() => ({}))
+    const body = await c.req.json<{ password?: string }>().catch(() => ({} as { password?: string }))
     if (body.password !== env.DASHBOARD_PASSWORD) return c.json({ error: 'invalid password' }, 401)
     return c.json({ token: env.QUERY_API_KEY, required: true })
   })

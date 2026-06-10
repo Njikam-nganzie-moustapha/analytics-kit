@@ -5,20 +5,29 @@ export interface RawEvent {
   site: string
   uid?: string
   url?: string
+  release?: string
   x?: number
   y?: number
   vpW?: number
   vpH?: number
   zoneId?: string
   dwellMs?: number
+  breadcrumbs?: Breadcrumb[]
   [key: string]: unknown
+}
+
+export interface Breadcrumb {
+  t: number
+  category: string
+  message: string
+  data?: Record<string, unknown>
 }
 
 export interface HeatmapCell {
   site: string
   url: string
-  gx: number      // floor(x / CELL_PX)
-  gy: number      // floor(y / CELL_PX)
+  gx: number
+  gy: number
   count: number
 }
 
@@ -28,8 +37,8 @@ export interface ZoneStat {
   url: string
   enters: number
   clicks: number
-  totalDwell: number   // sum of all dwell_ms for this zone
-  samples: number      // number of leave events (for avg computation)
+  totalDwell: number
+  samples: number
 }
 
 export interface SessionStat {
@@ -48,9 +57,11 @@ export interface ErrorGroup {
   fingerprint: string
   site: string
   message: string
-  eventType: string     // 'js_error' | 'network_error'
+  eventType: string
   source?: string
   stack?: string
+  release?: string
+  breadcrumbs?: Breadcrumb[]
   count: number
   sessions: Set<string>
   firstSeen: number
@@ -59,5 +70,5 @@ export interface ErrorGroup {
 
 export interface Checkpoint {
   site: string
-  lastT: number       // highest `t` processed so far
+  lastT: number
 }

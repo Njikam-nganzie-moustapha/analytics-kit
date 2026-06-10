@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -7,16 +7,15 @@ export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) ?? 
 export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t) }
 export function clearToken()        { localStorage.removeItem(TOKEN_KEY) }
 
-function hdrs(): HeadersInit {
+function hdrs(extra?: Record<string, string>): HeadersInit {
   const t = getToken()
-  return t ? { 'x-api-key': t } : {}
+  return t ? { 'x-api-key': t, ...extra } : { ...extra }
 }
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, init)
   if (res.status === 401) {
     clearToken()
-    // Re-throw so callers know auth failed
     throw Object.assign(new Error('unauthorized'), { status: 401 })
   }
   return res
@@ -35,7 +34,6 @@ export async function login(password: string): Promise<boolean> {
   })
   if (!res.ok) return false
   const data = await res.json() as { token: string | null; required: boolean }
-  // token === null means open access (no DASHBOARD_PASSWORD set)
   setToken(data.token ?? '')
   return true
 }
@@ -79,13 +77,57 @@ export async function fetchReplay(sid: string): Promise<unknown[]> {
 
 export async function fetchErrors(
   site: string,
-  opts: { from?: number; to?: number; limit?: number } = {},
+  opts: { from?: number; to?: number; limit?: number; status?: string } = {},
 ): Promise<ErrorGroup[]> {
   const q = new URLSearchParams({ site })
-  if (opts.from)  q.set('from',  String(opts.from))
-  if (opts.to)    q.set('to',    String(opts.to))
-  if (opts.limit) q.set('limit', String(opts.limit))
+  if (opts.from)   q.set('from',   String(opts.from))
+  if (opts.to)     q.set('to',     String(opts.to))
+  if (opts.limit)  q.set('limit',  String(opts.limit))
+  if (opts.status) q.set('status', opts.status)
   const res  = await apiFetch(`${BASE}/errors?${q}`, { headers: hdrs() })
-  const data = await res.json() as { errors: ErrorGroup[] }
-  return data.errors ?? []
+  const data = await res.json() as { errors: RawErrorGroup[] }
+  return (data.errors ?? []).map(normalizeError)
+}
+
+export async function updateError(
+  fingerprint: string,
+  site: string,
+  update: { status?: string; assignee?: string; note?: string },
+): Promise<void> {
+  await apiFetch(
+    `${BASE}/errors/${encodeURIComponent(fingerprint)}?site=${encodeURIComponent(site)}`,
+    {
+      method:  'PATCH',
+      headers: hdrs({ 'content-type': 'application/json' }),
+      body:    JSON.stringify(update),
+    },
+  )
+}
+
+export async function fetchCronMonitors(site: string): Promise<CronMonitor[]> {
+  const res  = await apiFetch(`${BASE}/cron?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  const data = await res.json() as { monitors: CronMonitor[] }
+  return data.monitors ?? []
+}
+
+export async function deleteCronMonitor(monitorId: string, site: string): Promise<void> {
+  await apiFetch(
+    `${BASE}/cron/${encodeURIComponent(monitorId)}?site=${encodeURIComponent(site)}`,
+    { method: 'DELETE', headers: hdrs() },
+  )
+}
+
+// ── Normalisation ─────────────────────────────────────────────────────────────
+// The API returns breadcrumbs as a JSON string; parse it here.
+
+interface RawErrorGroup extends Omit<ErrorGroup, 'breadcrumbs'> {
+  breadcrumbs: string | null
+}
+
+function normalizeError(r: RawErrorGroup): ErrorGroup {
+  let breadcrumbs: ErrorGroup['breadcrumbs'] = []
+  if (r.breadcrumbs) {
+    try { breadcrumbs = JSON.parse(r.breadcrumbs) } catch { /* ignore */ }
+  }
+  return { ...r, breadcrumbs }
 }

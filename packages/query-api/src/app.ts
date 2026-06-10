@@ -1,12 +1,26 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { MiddlewareHandler } from 'hono'
 import { requireAuth, authRouter } from './auth'
 import { heatmapRouter  } from './routes/heatmap'
 import { zonesRouter    } from './routes/zones'
 import { sessionsRouter } from './routes/sessions'
 import { replayRouter   } from './routes/replay'
 import { errorsRouter   } from './routes/errors'
+import { cronRouter     } from './routes/cron'
 import type { QueryTurso } from './turso'
+
+const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '1; mode=block')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Cross-Origin-Resource-Policy', 'cross-origin')
+  c.header('Cache-Control', 'no-store')
+  // CSP: analytics API returns JSON only — disallow rendering as page
+  c.header('Content-Security-Policy', "default-src 'none'")
+}
 
 export function createApp(db: QueryTurso) {
   const app = new Hono()
@@ -16,9 +30,14 @@ export function createApp(db: QueryTurso) {
     ? '*'
     : rawOrigins
 
+  if (process.env.NODE_ENV === 'production' && origin === '*') {
+    console.warn('[query-api] WARNING: CORS_ORIGINS not set — wildcard CORS active. Any website can read analytics data. Set CORS_ORIGINS=https://your-dashboard.vercel.app')
+  }
+
+  app.use('*', securityHeaders)
   app.use('*', cors({
     origin,
-    allowMethods: ['GET', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['content-type', 'x-api-key'],
     maxAge: 600,
   }))
@@ -33,6 +52,7 @@ export function createApp(db: QueryTurso) {
   app.route('/sessions', sessionsRouter(db))
   app.route('/replay',   replayRouter(db))
   app.route('/errors',   errorsRouter(db))
+  app.route('/cron',     cronRouter(db))
 
   return app
 }

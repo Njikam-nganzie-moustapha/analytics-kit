@@ -1,17 +1,19 @@
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useRef } from 'react'
+import { motion, useAnimate } from 'framer-motion'
 import { login } from '../api'
 
-interface Props {
-  onSuccess: () => void
-}
+interface Props { onSuccess: () => void }
 
 export function LoginScreen({ onSuccess }: Props) {
   const [password, setPassword] = useState('')
   const [busy,     setBusy]     = useState(false)
   const [err,      setErr]      = useState('')
+  const [scope, animateShake]   = useAnimate()
+  const inputRef = useRef<HTMLInputElement>(null)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (!password || busy) return
     setBusy(true)
     setErr('')
     const ok = await login(password)
@@ -21,52 +23,77 @@ export function LoginScreen({ onSuccess }: Props) {
     } else {
       setErr('Incorrect password')
       setPassword('')
+      animateShake(scope.current, { x: [-6, 6, -5, 5, -3, 3, 0] }, { duration: 0.45 })
+      setTimeout(() => inputRef.current?.focus(), 50)
     }
   }
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minHeight: '100vh', background: 'var(--bg, #0f1117)',
-    }}>
-      <form onSubmit={handleSubmit} style={{
-        background: 'var(--card, #1a1d27)', border: '1px solid var(--border, #2a2d3a)',
-        borderRadius: 12, padding: '2rem', width: 320,
-        display: 'flex', flexDirection: 'column', gap: '1rem',
-      }}>
-        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text, #e2e8f0)', textAlign: 'center' }}>
-          analytics<span style={{ color: 'var(--accent, #6366f1)' }}>kit</span>
+    <motion.div
+      className="login-bg"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.25 }}
+    >
+      {/* Ambient orbs */}
+      <div className="login-orb login-orb-1" />
+      <div className="login-orb login-orb-2" />
+
+      <motion.form
+        ref={scope}
+        className="login-card"
+        onSubmit={handleSubmit}
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1,    y: 0  }}
+        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1], delay: 0.05 }}
+      >
+        <div>
+          <div className="login-logo">
+            analytics<span>kit</span>
+          </div>
+          <p className="login-subtitle">Sign in to continue</p>
         </div>
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          autoFocus
-          style={{
-            background: 'var(--bg, #0f1117)', border: '1px solid var(--border, #2a2d3a)',
-            borderRadius: 6, padding: '0.5rem 0.75rem', color: 'var(--text, #e2e8f0)',
-            fontSize: '0.9rem', outline: 'none',
-          }}
-        />
+        <div className="login-field">
+          <label className="login-label" htmlFor="pw">Password</label>
+          <input
+            id="pw"
+            ref={inputRef}
+            type="password"
+            className="login-input"
+            placeholder="••••••••"
+            value={password}
+            onChange={e => { setPassword(e.target.value); setErr('') }}
+            autoFocus
+            autoComplete="current-password"
+          />
+        </div>
 
-        {err && (
-          <div style={{ color: '#f87171', fontSize: '0.8rem', textAlign: 'center' }}>{err}</div>
-        )}
+        <motion.p
+          className="login-error"
+          initial={false}
+          animate={err ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }}
+          transition={{ duration: 0.15 }}
+        >
+          {err}
+        </motion.p>
 
         <button
           type="submit"
+          className="login-btn"
           disabled={busy || !password}
-          style={{
-            background: 'var(--accent, #6366f1)', color: '#fff', border: 'none',
-            borderRadius: 6, padding: '0.55rem', fontWeight: 600, cursor: 'pointer',
-            opacity: (busy || !password) ? 0.5 : 1,
-          }}
         >
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy
+            ? <motion.span
+                key="spin"
+                style={{ display: 'inline-block' }}
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.7, repeat: Infinity, ease: 'linear' }}
+              >⟳</motion.span>
+            : 'Sign in'
+          }
         </button>
-      </form>
-    </div>
+      </motion.form>
+    </motion.div>
   )
 }

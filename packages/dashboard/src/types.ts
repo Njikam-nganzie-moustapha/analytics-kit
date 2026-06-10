@@ -13,6 +13,15 @@ export interface SessionRow {
   urlCount: number; eventCount: number; hasReplay: boolean
 }
 
+export type ErrorStatus = 'open' | 'ignored' | 'resolved' | 'regressed'
+
+export interface Breadcrumb {
+  t: number
+  category: 'navigation' | 'click' | 'console' | 'http'
+  message: string
+  data?: Record<string, unknown>
+}
+
 export interface ErrorGroup {
   fingerprint: string
   site: string
@@ -20,8 +29,23 @@ export interface ErrorGroup {
   eventType: string
   source: string | null
   stack: string | null
+  release: string | null
+  breadcrumbs: Breadcrumb[]
   count: number
   sessions: number
   firstSeen: number
   lastSeen: number
+  // from error_states JOIN
+  status: ErrorStatus
+  assignee: string | null
+  note: string | null
+}
+
+export interface CronMonitor {
+  monitorId: string
+  site: string
+  intervalMs: number
+  graceMs: number
+  lastCheckin: number | null
+  status: 'ok' | 'late' | 'missing'
 }
