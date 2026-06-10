@@ -951,3 +951,136 @@ tbody tr:hover td { background: var(--surface-2); }
 .smap-table td { padding: 8px 14px; border-bottom: 1px solid var(--border); }
 .smap-table tr:last-child td { border-bottom: none; }
 .smap-table tr:hover td { background: var(--surface-2); }
+
+/* ── Error list v2 ───────────────────────────────────────────────────────────── */
+.error-header-v2,
+.error-row-v2 {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.error-header-v2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.error-row-v2 {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .12s;
+}
+.error-row-v2:last-child { border-bottom: none; }
+.error-row-v2:hover { background: var(--surface-2); }
+.error-row-v2.open  { background: var(--surface-2); }
+.error-row-v2.dimmed { opacity: .45; }
+
+.error-chevron {
+  display: inline-block;
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform .15s;
+  user-select: none;
+}
+.error-chevron.open { transform: rotate(90deg); }
+
+/* ── Error detail panel ──────────────────────────────────────────────────────── */
+.error-detail {
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 6px;
+  flex-wrap: wrap;
+}
+.error-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.error-tab-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.error-tab-btn:hover  { background: var(--surface-2); color: var(--text); }
+.error-tab-btn.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent-dim); }
+
+/* ── User badge ──────────────────────────────────────────────────────────────── */
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* ── Occurrence list ─────────────────────────────────────────────────────────── */
+.occ-list { font-size: 12px; padding: 8px 14px; }
+.occ-header {
+  display: grid;
+  grid-template-columns: 90px 1fr 100px 80px;
+  gap: 8px;
+  padding: 4px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.occ-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 100px 80px;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .1s;
+  border-radius: 4px;
+}
+.occ-row:hover { background: var(--surface-2); }
+.occ-row.open  { background: var(--surface-2); }
+.occ-row:last-child { border-bottom: none; }
+.occ-ts      { color: var(--text-2); white-space: nowrap; }
+.occ-url     { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-family: monospace; }
+.occ-user    { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+.occ-release { color: var(--accent-2); font-size: 11px; }
+.occ-stack {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0 8px;
+  color: var(--error-2);
+  line-height: 1.6;
+}
+.occ-loading { padding: 12px 14px; color: var(--text-muted); font-size: 12px; }
+.occ-empty   { padding: 12px 14px; color: var(--text-muted); font-size: 12px; font-style: italic; }
+
