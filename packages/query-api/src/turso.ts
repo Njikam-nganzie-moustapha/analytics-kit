@@ -115,6 +115,23 @@ export interface CronMonitorRow {
   lastCheckin: number | null
 }
 
+export interface ErrorActivityRow {
+  id: number
+  site: string
+  fingerprint: string
+  action: string
+  actor: string | null
+  ts: number
+}
+
+export interface ReleaseRow {
+  release: string
+  site: string
+  groups: number
+  events: number
+  lastSeen: number
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -273,6 +290,7 @@ export class QueryTurso {
     site: string,
     fingerprint: string,
     update: { status?: string; assignee?: string; note?: string },
+    actor?: string,
   ): Promise<void> {
     const now = int(Date.now())
     const nullArg: TursoArg = { type: 'null', value: null }
@@ -299,6 +317,58 @@ export class QueryTurso {
        ON CONFLICT (site, fingerprint) DO UPDATE SET ${setClauses.join(', ')}`,
       [...insertArgs, ...setArgs],
     )
+
+    // Log activity entry
+    const actions: string[] = []
+    if (update.status   !== undefined) actions.push(`status → ${update.status}`)
+    if (update.assignee !== undefined) actions.push(`assigned → ${update.assignee || 'unassigned'}`)
+    if (update.note     !== undefined) actions.push('note updated')
+    if (actions.length > 0) {
+      await this.logErrorActivity(site, fingerprint, actions.join(', '), actor)
+    }
+  }
+
+  async logErrorActivity(site: string, fingerprint: string, action: string, actor?: string): Promise<void> {
+    const nullArg: TursoArg = { type: 'null', value: null }
+    await this._execute(
+      `INSERT INTO error_activity (site, fingerprint, action, actor, ts) VALUES (?, ?, ?, ?, ?)`,
+      [str(site), str(fingerprint), str(action), actor ? str(actor) : nullArg, int(Date.now())],
+    )
+  }
+
+  async getErrorActivity(site: string, fingerprint: string, limit = 50): Promise<ErrorActivityRow[]> {
+    const rows = await this._query(
+      `SELECT id, site, fingerprint, action, actor, ts FROM error_activity
+       WHERE site = ? AND fingerprint = ? ORDER BY ts DESC LIMIT ?`,
+      [str(site), str(fingerprint), int(limit)],
+    )
+    return rows.map(r => ({
+      id:          parseInt(r.id ?? '0'),
+      site:        r.site!,
+      fingerprint: r.fingerprint!,
+      action:      r.action!,
+      actor:       r.actor ?? null,
+      ts:          parseInt(r.ts ?? '0'),
+    }))
+  }
+
+  async getReleases(site: string): Promise<ReleaseRow[]> {
+    const rows = await this._query(
+      `SELECT release, site, COUNT(*) as groups, SUM(count) as events, MAX(last_seen) as last_seen
+       FROM error_groups
+       WHERE site = ? AND release IS NOT NULL
+       GROUP BY release
+       ORDER BY last_seen DESC
+       LIMIT 50`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      release:  r.release!,
+      site:     r.site!,
+      groups:   parseInt(r.groups ?? '0'),
+      events:   parseInt(r.events ?? '0'),
+      lastSeen: parseInt(r.last_seen ?? '0'),
+    }))
   }
 
   // ── Vitals ───────────────────────────────────────────────────────────────────
@@ -504,6 +574,20 @@ export class QueryTurso {
           count       INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (site, fingerprint, date)
         )` }},
+      { type: 'close' },
+    ])
+
+    // error_activity — audit log for status changes
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_activity (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          site        TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          action      TEXT NOT NULL,
+          actor       TEXT,
+          ts          INTEGER NOT NULL
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_error_activity_fp ON error_activity (site, fingerprint, ts DESC)` } },
       { type: 'close' },
     ])
 

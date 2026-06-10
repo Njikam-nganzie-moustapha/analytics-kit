@@ -69,13 +69,15 @@ export function init(cfg: TrackerConfig): void {
 export function makePush(): PushFn {
   return function push(partial) {
     if (!_transport || !_config) return
+    const env = _config.env && _config.env !== 'production' ? _config.env : undefined
     const event = {
       t: Date.now(),
       sid: _sessionId,
-      site: _config.siteId,
+      site: env ? `${_config.siteId}:${env}` : _config.siteId,
       uid:        _config.userId,
       user_email: _config.userContext?.email,
       user_name:  _config.userContext?.name,
+      env,
       release: _config.release,
       url: location.href,
       ...partial,

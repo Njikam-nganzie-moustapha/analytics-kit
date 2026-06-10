@@ -8,6 +8,7 @@ import { CronMonitors    } from './components/CronMonitors'
 import { SourceMapsTab   } from './components/SourceMapsTab'
 import { VitalsPanel     } from './components/VitalsPanel'
 import { OverviewPanel   } from './components/OverviewPanel'
+import { ReleasesTab     } from './components/ReleasesTab'
 import { ReplayModal     } from './components/ReplayModal'
 import { LoginScreen     } from './components/LoginScreen'
 import {
@@ -17,7 +18,7 @@ import {
 } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
 
-type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'vitals' | 'cron' | 'sourcemaps'
+type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'vitals' | 'cron' | 'sourcemaps'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview',    label: 'Overview',     icon: '⬡' },
@@ -25,6 +26,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'zones',       label: 'Zones',        icon: '⊡' },
   { id: 'sessions',    label: 'Sessions',     icon: '◉' },
   { id: 'errors',      label: 'Errors',       icon: '⊘' },
+  { id: 'releases',    label: 'Releases',     icon: '⊛' },
   { id: 'vitals',      label: 'Vitals',       icon: '♡' },
   { id: 'cron',        label: 'Cron',         icon: '⏱' },
   { id: 'sourcemaps',  label: 'Source Maps',  icon: '⊞' },
@@ -56,6 +58,7 @@ export function App() {
 
   const [siteInput, setSiteInput] = useState(KNOWN_SITES[0] ?? '')
   const [urlInput,  setUrlInput]  = useState('')
+  const [envInput,  setEnvInput]  = useState('production')
   const [tab,  setTab]  = useState<Tab>('overview')
   const [query, setQuery] = useState({ site: '', url: '' })
 
@@ -117,8 +120,14 @@ export function App() {
     if (query.site) load(query, tab)
   }, [tab, query, load])
 
+  function effectiveSite(): string {
+    const s = siteInput.trim()
+    const e = envInput.trim()
+    return e && e !== 'production' ? `${s}:${e}` : s
+  }
+
   function handleLoad() {
-    const q = { site: siteInput.trim(), url: urlInput.trim() }
+    const q = { site: effectiveSite(), url: urlInput.trim() }
     setQuery(q)
     load(q, tab)
   }
@@ -161,6 +170,7 @@ export function App() {
         onDelete={id => setMonitors(prev => prev.filter(m => m.monitorId !== id))}
       />
     )
+    if (tab === 'releases')   return <ReleasesTab site={query.site} />
     if (tab === 'sourcemaps') return <SourceMapsTab site={query.site} />
   }
 
@@ -181,6 +191,16 @@ export function App() {
             onChange={e => setSiteInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleLoad()}
           />
+          <select
+            className="input input-env"
+            value={envInput}
+            onChange={e => setEnvInput(e.target.value)}
+            title="Environment"
+          >
+            <option value="production">production</option>
+            <option value="staging">staging</option>
+            <option value="development">development</option>
+          </select>
           <input
             className="input input-url"
             placeholder="/url (optional)"

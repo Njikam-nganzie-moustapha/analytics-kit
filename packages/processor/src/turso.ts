@@ -392,6 +392,20 @@ export class ProcessorTurso {
       { type: 'close' },
     ])
 
+    // error_activity — status change audit log
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_activity (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        site        TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        actor       TEXT,
+        ts          INTEGER NOT NULL
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_error_activity_fp ON error_activity (site, fingerprint, ts DESC)` } },
+      { type: 'close' },
+    ])
+
     // Column migrations — ignore errors for columns that already exist
     for (const col of ['release TEXT', 'breadcrumbs TEXT', 'user_sample TEXT']) {
       await this._pipeline([

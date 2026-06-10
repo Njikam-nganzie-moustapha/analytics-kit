@@ -77,3 +77,20 @@ export interface CronMonitor {
   lastCheckin: number | null
   status: 'ok' | 'late' | 'missing'
 }
+
+export interface ErrorActivity {
+  id: number
+  site: string
+  fingerprint: string
+  action: string
+  actor: string | null
+  ts: number
+}
+
+export interface ReleaseRow {
+  release: string
+  site: string
+  groups: number
+  events: number
+  lastSeen: number
+}

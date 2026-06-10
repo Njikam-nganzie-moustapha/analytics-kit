@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ErrorGroup, ErrorStatus, Breadcrumb, ErrorOccurrence, UserSample } from '../types'
-import { updateError, fetchErrorEvents } from '../api'
+import type { ErrorGroup, ErrorStatus, Breadcrumb, ErrorOccurrence, UserSample, ErrorActivity } from '../types'
+import { updateError, fetchErrorEvents, fetchErrorActivity } from '../api'
 
 interface Props {
   errors: ErrorGroup[]
@@ -188,17 +188,18 @@ export function ErrorList({ errors, site, onUpdate }: Props) {
 
   // Per-fingerprint event occurrences cache
   const [occCache,     setOccCache]     = useState<Record<string, ErrorOccurrence[] | null>>({})
-  const [activeTab,    setActiveTab]    = useState<Record<string, 'detail' | 'events'>>({})
+  const [activityCache, setActivityCache] = useState<Record<string, ErrorActivity[] | null>>({})
+  const [activeTab,    setActiveTab]    = useState<Record<string, 'detail' | 'events' | 'activity'>>({})
 
   const searchRef = useRef<HTMLInputElement>(null)
 
   const getTab = (fp: string) => activeTab[fp] ?? 'detail'
-  const setTab = (fp: string, t: 'detail' | 'events') =>
+  const setTab = (fp: string, t: 'detail' | 'events' | 'activity') =>
     setActiveTab(prev => ({ ...prev, [fp]: t }))
 
   const loadEvents = useCallback(async (fp: string) => {
     if (occCache[fp] !== undefined) return
-    setOccCache(prev => ({ ...prev, [fp]: null }))  // null = loading
+    setOccCache(prev => ({ ...prev, [fp]: null }))
     try {
       const evs = await fetchErrorEvents(fp, site)
       setOccCache(prev => ({ ...prev, [fp]: evs }))
@@ -207,10 +208,22 @@ export function ErrorList({ errors, site, onUpdate }: Props) {
     }
   }, [occCache, site])
 
-  const handleTabChange = useCallback((fp: string, tab: 'detail' | 'events') => {
+  const loadActivity = useCallback(async (fp: string) => {
+    if (activityCache[fp] !== undefined) return
+    setActivityCache(prev => ({ ...prev, [fp]: null }))
+    try {
+      const acts = await fetchErrorActivity(fp, site)
+      setActivityCache(prev => ({ ...prev, [fp]: acts }))
+    } catch {
+      setActivityCache(prev => ({ ...prev, [fp]: [] }))
+    }
+  }, [activityCache, site])
+
+  const handleTabChange = useCallback((fp: string, tab: 'detail' | 'events' | 'activity') => {
     setTab(fp, tab)
-    if (tab === 'events') loadEvents(fp)
-  }, [loadEvents])
+    if (tab === 'events')   loadEvents(fp)
+    if (tab === 'activity') loadActivity(fp)
+  }, [loadEvents, loadActivity])
 
   // Client-side filtering
   const ql = searchQuery.toLowerCase()
@@ -365,13 +378,13 @@ export function ErrorList({ errors, site, onUpdate }: Props) {
 
                     {/* Tab switcher */}
                     <div className="error-tabs">
-                      {(['detail', 'events'] as const).map(t => (
+                      {(['detail', 'events', 'activity'] as const).map(t => (
                         <button
                           key={t}
                           className={`error-tab-btn ${tab === t ? 'active' : ''}`}
                           onClick={e => { e.stopPropagation(); handleTabChange(err.fingerprint, t) }}
                         >
-                          {t === 'detail' ? 'Details' : 'Occurrences'}
+                          {t === 'detail' ? 'Details' : t === 'events' ? 'Occurrences' : 'Activity'}
                         </button>
                       ))}
                     </div>
@@ -398,6 +411,25 @@ export function ErrorList({ errors, site, onUpdate }: Props) {
                         ? <div className="occ-loading">Loading occurrences…</div>
                         : <OccurrenceList events={occ ?? []} />
                     )}
+
+                    {/* Activity tab */}
+                    {tab === 'activity' && (() => {
+                      const acts = activityCache[err.fingerprint]
+                      if (acts === null) return <div className="occ-loading">Loading activity…</div>
+                      if (!acts || acts.length === 0) return <div className="occ-empty">No activity recorded yet.</div>
+                      return (
+                        <div className="activity-list">
+                          {acts.map(a => (
+                            <div key={a.id} className="activity-row">
+                              <span className="activity-dot" />
+                              <span className="activity-action">{a.action}</span>
+                              {a.actor && <span className="activity-actor">by {a.actor}</span>}
+                              <span className="activity-ts">{timeAgo(a.ts)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </motion.div>
                 )}
               </AnimatePresence>

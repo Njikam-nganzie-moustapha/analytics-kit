@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -90,6 +90,21 @@ export async function fetchErrors(
   const res  = await apiFetch(`${BASE}/errors?${q}`, { headers: hdrs() })
   const data = await res.json() as { errors: RawErrorGroup[] }
   return (data.errors ?? []).map(normalizeError)
+}
+
+export async function fetchErrorActivity(fingerprint: string, site: string): Promise<ErrorActivity[]> {
+  const q = new URLSearchParams({ site })
+  const res  = await apiFetch(`${BASE}/errors/${encodeURIComponent(fingerprint)}/activity?${q}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { activity: ErrorActivity[] }
+  return data.activity ?? []
+}
+
+export async function fetchReleases(site: string): Promise<ReleaseRow[]> {
+  const res  = await apiFetch(`${BASE}/releases?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { releases: ReleaseRow[] }
+  return data.releases ?? []
 }
 
 export async function fetchErrorEvents(fingerprint: string, site: string): Promise<ErrorOccurrence[]> {

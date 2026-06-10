@@ -112,6 +112,15 @@ function makeApp(env: Env) {
     return c.json({ errors, meta: { site: p.site, total: errors.length } })
   })
 
+  app.get('/errors/:fingerprint/activity', async c => {
+    const fp  = c.req.param('fingerprint')
+    const p   = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const limit = c.req.query('limit') ? Math.min(parseInt(c.req.query('limit')!), 200) : 50
+    const activity = await db.getErrorActivity(p.site, fp, limit)
+    return c.json({ activity, fingerprint: fp })
+  })
+
   app.get('/errors/:fingerprint/events', async c => {
     const fp  = c.req.param('fingerprint')
     const p   = parseSite(c.req.query('site'))
@@ -132,6 +141,14 @@ function makeApp(env: Env) {
     }
     await db.updateErrorState(p.site, fingerprint, body)
     return c.json({ ok: true })
+  })
+
+  // ── Releases ──────────────────────────────────────────────────────────────
+  app.get('/releases', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const releases = await db.getReleases(p.site)
+    return c.json({ releases, meta: { site: p.site, total: releases.length } })
   })
 
   // ── Vitals ────────────────────────────────────────────────────────────────

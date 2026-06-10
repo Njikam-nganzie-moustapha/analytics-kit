@@ -47,6 +47,7 @@ export interface UserContext {
 export interface TrackerConfig {
   siteId: string
   collectorUrl: string
+  env?: string              // 'production' | 'staging' | 'development' — default: 'production'
   zones?: ZoneDef[]
   userId?: string
   userContext?: UserContext
