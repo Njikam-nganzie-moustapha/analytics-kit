@@ -4,7 +4,7 @@ import { buildZoneStats } from './zones'
 import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
 import { buildVitalsBuckets } from './vitals'
-import { createConsumer, symbolicateStack } from './symbolicate'
+import { createConsumer, symbolicateStack, type SourceMapConsumer } from './symbolicate'
 import { checkAlerts } from './alerts'
 
 const BATCH_LIMIT = 5_000
@@ -93,11 +93,11 @@ async function symbolicateErrorGroups(
   if (releases.size === 0) return
 
   // Load source maps per release
-  const consumersByRelease = new Map<string, Map<string, ReturnType<typeof createConsumer>>>()
+  const consumersByRelease = new Map<string, Map<string, SourceMapConsumer>>()
   for (const release of releases) {
     const maps = await db.getSourceMaps(site, release)
     if (maps.length === 0) continue
-    const consumers = new Map<string, NonNullable<ReturnType<typeof createConsumer>>>()
+    const consumers = new Map<string, SourceMapConsumer>()
     for (const { filename, content } of maps) {
       const c = createConsumer(content)
       if (c) consumers.set(filename, c)
