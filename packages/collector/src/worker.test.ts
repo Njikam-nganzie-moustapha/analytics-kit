@@ -4,16 +4,15 @@ import worker from './worker'
 // Intercept all fetch() calls so no real Turso requests are made
 const originalFetch = globalThis.fetch
 beforeAll(() => {
-  globalThis.fetch = mock(async (url: RequestInfo | URL) => {
+  globalThis.fetch = mock(async (url: unknown) => {
     const u = String(url)
     if (u.includes('turso') || u.includes('pipeline')) {
-      // Simulate successful Turso batch write
       return new Response(JSON.stringify({
         results: [{ response: { type: 'execute', result: { cols: [], rows: [] } } }],
       }), { status: 200 })
     }
     return new Response('not found', { status: 404 })
-  }) as typeof fetch
+  }) as unknown as typeof fetch
 })
 afterAll(() => { globalThis.fetch = originalFetch })
 

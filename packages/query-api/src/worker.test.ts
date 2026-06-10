@@ -4,7 +4,7 @@ import worker from './worker'
 // Intercept all Turso fetch calls
 const originalFetch = globalThis.fetch
 beforeAll(() => {
-  globalThis.fetch = mock(async (url: RequestInfo | URL) => {
+  globalThis.fetch = mock(async (url: unknown) => {
     const u = String(url)
     if (u.includes('turso') || u.includes('pipeline')) {
       return new Response(JSON.stringify({
@@ -17,7 +17,7 @@ beforeAll(() => {
       }), { status: 200 })
     }
     return new Response('not found', { status: 404 })
-  }) as typeof fetch
+  }) as unknown as typeof fetch
 })
 afterAll(() => { globalThis.fetch = originalFetch })
 
