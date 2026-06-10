@@ -8,3 +8,7 @@ dist/
 bun.lockb
 
 .vercel
+
+# Wrangler build output
+packages/*/tmp/
+packages/*/.wrangler/
