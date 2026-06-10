@@ -7,7 +7,9 @@ import { zonesRouter    } from './routes/zones'
 import { sessionsRouter } from './routes/sessions'
 import { replayRouter   } from './routes/replay'
 import { errorsRouter   } from './routes/errors'
-import { cronRouter     } from './routes/cron'
+import { cronRouter       } from './routes/cron'
+import { vitalsRouter     } from './routes/vitals'
+import { sourcemapsRouter } from './routes/sourcemaps'
 import type { QueryTurso } from './turso'
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -51,8 +53,10 @@ export function createApp(db: QueryTurso) {
   app.route('/zones',    zonesRouter(db))
   app.route('/sessions', sessionsRouter(db))
   app.route('/replay',   replayRouter(db))
-  app.route('/errors',   errorsRouter(db))
-  app.route('/cron',     cronRouter(db))
+  app.route('/errors',     errorsRouter(db))
+  app.route('/cron',       cronRouter(db))
+  app.route('/vitals',     vitalsRouter(db))
+  app.route('/sourcemaps', sourcemapsRouter(db))
 
   return app
 }

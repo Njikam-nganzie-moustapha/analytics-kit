@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import type { QueryTurso } from '../turso'
+import { parseSite } from '../validate'
 
 export function errorsRouter(db: QueryTurso) {
   const app = new Hono()
 
   // GET /errors?site=X&status=open|ignored|resolved|regressed&from=&to=&limit=
   app.get('/', async c => {
-    const site = c.req.query('site')
-    if (!site) return c.json({ error: 'site is required' }, 400)
+    const parsed = parseSite(c.req.query('site'))
+    if (!parsed) return c.json({ error: 'site is required and must be a valid site ID (a-z, 0-9, -, _, .)' }, 400)
+    const { site } = parsed
 
     const from   = c.req.query('from')   ? parseInt(c.req.query('from')!)   : undefined
     const to     = c.req.query('to')     ? parseInt(c.req.query('to')!)     : undefined
@@ -21,9 +23,10 @@ export function errorsRouter(db: QueryTurso) {
   // PATCH /errors/:fingerprint?site=X
   // Body: { status?, assignee?, note? }
   app.patch('/:fingerprint', async c => {
-    const site        = c.req.query('site')
+    const parsed      = parseSite(c.req.query('site'))
     const fingerprint = c.req.param('fingerprint')
-    if (!site)        return c.json({ error: 'site is required' }, 400)
+    if (!parsed)      return c.json({ error: 'site is required and must be a valid site ID (a-z, 0-9, -, _, .)' }, 400)
+    const { site }    = parsed
     if (!fingerprint) return c.json({ error: 'fingerprint is required' }, 400)
 
     let body: { status?: string; assignee?: string; note?: string }
