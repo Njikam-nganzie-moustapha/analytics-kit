@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -56,13 +56,15 @@ export async function fetchZones(site: string, url?: string): Promise<ZoneRow[]>
 
 export async function fetchSessions(
   site: string,
-  opts: { from?: number; to?: number; limit?: number; hasReplay?: boolean } = {},
+  opts: { from?: number; to?: number; limit?: number; hasReplay?: boolean; hasError?: boolean; urlContains?: string } = {},
 ): Promise<SessionRow[]> {
   const q = new URLSearchParams({ site })
-  if (opts.from)      q.set('from',       String(opts.from))
-  if (opts.to)        q.set('to',         String(opts.to))
-  if (opts.limit)     q.set('limit',      String(opts.limit))
-  if (opts.hasReplay) q.set('has_replay', '1')
+  if (opts.from)        q.set('from',       String(opts.from))
+  if (opts.to)          q.set('to',         String(opts.to))
+  if (opts.limit)       q.set('limit',      String(opts.limit))
+  if (opts.hasReplay)   q.set('has_replay', '1')
+  if (opts.hasError)    q.set('has_error',  '1')
+  if (opts.urlContains) q.set('url',        opts.urlContains)
   const res  = await apiFetch(`${BASE}/sessions?${q}`, { headers: hdrs() })
   const data = await res.json() as { sessions: SessionRow[] }
   return data.sessions ?? []
@@ -77,16 +79,25 @@ export async function fetchReplay(sid: string): Promise<unknown[]> {
 
 export async function fetchErrors(
   site: string,
-  opts: { from?: number; to?: number; limit?: number; status?: string } = {},
+  opts: { from?: number; to?: number; limit?: number; status?: string; query?: string } = {},
 ): Promise<ErrorGroup[]> {
   const q = new URLSearchParams({ site })
   if (opts.from)   q.set('from',   String(opts.from))
   if (opts.to)     q.set('to',     String(opts.to))
   if (opts.limit)  q.set('limit',  String(opts.limit))
   if (opts.status) q.set('status', opts.status)
+  if (opts.query)  q.set('query',  opts.query)
   const res  = await apiFetch(`${BASE}/errors?${q}`, { headers: hdrs() })
   const data = await res.json() as { errors: RawErrorGroup[] }
   return (data.errors ?? []).map(normalizeError)
+}
+
+export async function fetchErrorEvents(fingerprint: string, site: string): Promise<ErrorOccurrence[]> {
+  const q = new URLSearchParams({ site })
+  const res  = await apiFetch(`${BASE}/errors/${encodeURIComponent(fingerprint)}/events?${q}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { events: ErrorOccurrence[] }
+  return data.events ?? []
 }
 
 export async function updateError(
@@ -172,8 +183,10 @@ export async function deleteSourceMap(site: string, release: string, filename: s
 // ── Normalisation ─────────────────────────────────────────────────────────────
 // The API returns breadcrumbs as a JSON string; parse it here.
 
-interface RawErrorGroup extends Omit<ErrorGroup, 'breadcrumbs'> {
-  breadcrumbs: string | null
+interface RawErrorGroup extends Omit<ErrorGroup, 'breadcrumbs' | 'userSample' | 'recentCounts'> {
+  breadcrumbs:  string | null
+  userSample:   string | null
+  recentCounts: number[] | undefined
 }
 
 function normalizeError(r: RawErrorGroup): ErrorGroup {
@@ -181,5 +194,9 @@ function normalizeError(r: RawErrorGroup): ErrorGroup {
   if (r.breadcrumbs) {
     try { breadcrumbs = JSON.parse(r.breadcrumbs) } catch { /* ignore */ }
   }
-  return { ...r, breadcrumbs }
+  let userSample: UserSample | null = null
+  if (r.userSample) {
+    try { userSample = JSON.parse(r.userSample) } catch { /* ignore */ }
+  }
+  return { ...r, breadcrumbs, userSample, recentCounts: r.recentCounts ?? new Array(14).fill(0) }
 }

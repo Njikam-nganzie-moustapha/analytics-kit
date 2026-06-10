@@ -5,19 +5,31 @@ import { parseSite } from '../validate'
 export function errorsRouter(db: QueryTurso) {
   const app = new Hono()
 
-  // GET /errors?site=X&status=open|ignored|resolved|regressed&from=&to=&limit=
+  // GET /errors?site=X&status=...&query=text&from=&to=&limit=
   app.get('/', async c => {
     const parsed = parseSite(c.req.query('site'))
     if (!parsed) return c.json({ error: 'site is required and must be a valid site ID (a-z, 0-9, -, _, .)' }, 400)
     const { site } = parsed
 
-    const from   = c.req.query('from')   ? parseInt(c.req.query('from')!)   : undefined
-    const to     = c.req.query('to')     ? parseInt(c.req.query('to')!)     : undefined
-    const limit  = c.req.query('limit')  ? parseInt(c.req.query('limit')!)  : undefined
+    const from   = c.req.query('from')   ? parseInt(c.req.query('from')!)  : undefined
+    const to     = c.req.query('to')     ? parseInt(c.req.query('to')!)    : undefined
+    const limit  = c.req.query('limit')  ? parseInt(c.req.query('limit')!) : undefined
     const status = c.req.query('status') ?? undefined
+    const query  = c.req.query('query')  ?? undefined
 
-    const errors = await db.getErrorGroups(site, { from, to, limit, status })
+    const errors = await db.getErrorGroups(site, { from, to, limit, status, query })
     return c.json({ errors })
+  })
+
+  // GET /errors/:fingerprint/events?site=X&limit=N — individual occurrences
+  app.get('/:fingerprint/events', async c => {
+    const parsed      = parseSite(c.req.query('site'))
+    const fingerprint = c.req.param('fingerprint')
+    if (!parsed) return c.json({ error: 'site is required and must be a valid site ID (a-z, 0-9, -, _, .)' }, 400)
+    const { site } = parsed
+    const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : 25
+    const events = await db.getErrorEvents(site, fingerprint, Math.min(limit, 100))
+    return c.json({ events, fingerprint })
   })
 
   // PATCH /errors/:fingerprint?site=X

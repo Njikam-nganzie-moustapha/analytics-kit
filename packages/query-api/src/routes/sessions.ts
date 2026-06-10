@@ -15,12 +15,15 @@ export function sessionsRouter(db: QueryTurso) {
     const limitStr    = c.req.query('limit')
     const hasReplayQs = c.req.query('has_replay')
 
-    const from      = fromStr  ? parseInt(fromStr)  : undefined
-    const to        = toStr    ? parseInt(toStr)    : undefined
-    const limit     = limitStr ? parseInt(limitStr) : 100
-    const hasReplay = hasReplayQs === '1' || hasReplayQs === 'true' ? true : undefined
+    const from         = fromStr  ? parseInt(fromStr)  : undefined
+    const to           = toStr    ? parseInt(toStr)    : undefined
+    const limit        = limitStr ? parseInt(limitStr) : 100
+    const hasReplay    = hasReplayQs === '1' || hasReplayQs === 'true' ? true : undefined
+    const hasErrorQs   = c.req.query('has_error')
+    const hasError     = hasErrorQs === '1' || hasErrorQs === 'true' ? true : undefined
+    const urlContains  = c.req.query('url') ?? undefined
 
-    const sessions = await db.getSessions(site, { from, to, limit, hasReplay })
+    const sessions = await db.getSessions(site, { from, to, limit, hasReplay, hasError, urlContains })
     return c.json({ sessions, meta: { site, total: sessions.length } })
   })
 

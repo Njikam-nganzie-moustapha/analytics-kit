@@ -495,13 +495,29 @@ export class QueryTurso {
     ]
     await this._pipeline(extra)
 
-    // Migrations for error_groups columns that may not exist yet
-    for (const col of ['release TEXT', 'breadcrumbs TEXT']) {
+    // error_daily_stats table
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_daily_stats (
+          site        TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          date        TEXT NOT NULL,
+          count       INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, fingerprint, date)
+        )` }},
+      { type: 'close' },
+    ])
+
+    // Column migrations — ignore if already exists
+    for (const col of ['release TEXT', 'breadcrumbs TEXT', 'user_sample TEXT']) {
       await this._pipeline([
         { type: 'execute', stmt: { sql: `ALTER TABLE error_groups ADD COLUMN ${col}` } },
         { type: 'close' },
-      ]).catch(() => { /* column already exists */ })
+      ]).catch(() => { /* already exists */ })
     }
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0` } },
+      { type: 'close' },
+    ]).catch(() => { /* already exists */ })
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
