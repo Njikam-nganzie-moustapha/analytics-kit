@@ -3,6 +3,8 @@ import { buildHeatmapCells } from './heatmap'
 import { buildZoneStats } from './zones'
 import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
+import { buildVitalsBuckets } from './vitals'
+import { createConsumer, symbolicateStack } from './symbolicate'
 import { checkAlerts } from './alerts'
 
 const BATCH_LIMIT = 5_000
@@ -27,24 +29,32 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
 
     const maxT = Math.max(...events.map(e => e.t))
 
-    const heatmapCells = buildHeatmapCells(events)
-    const zoneStats    = buildZoneStats(events)
-    const sessionStats = buildSessionStats(events)
-    const errorGroups  = buildErrorGroups(events)
+    const heatmapCells  = buildHeatmapCells(events)
+    const zoneStats     = buildZoneStats(events)
+    const sessionStats  = buildSessionStats(events)
+    const errorGroups   = buildErrorGroups(events)
+    const vitalsBuckets = buildVitalsBuckets(events)
 
     await Promise.allSettled([
       db.upsertHeatmapCells(heatmapCells),
       db.upsertZoneStats(zoneStats),
       db.upsertSessions(sessionStats),
       db.upsertErrorGroups(errorGroups),
+      db.upsertVitalsBuckets(vitalsBuckets),
+      db.upsertErrorDailyStats(errorGroups),
     ]).then(results => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          const names = ['heatmap', 'zones', 'sessions', 'errors']
+          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals']
           console.error(`[processor] ${site} ${names[i]} upsert failed:`, r.reason)
         }
       })
     })
+
+    // Source map symbolication — enrich error stacks with original positions
+    await symbolicateErrorGroups(db, site, errorGroups).catch(e =>
+      console.warn(`[processor] ${site} symbolication failed:`, e),
+    )
 
     // Regression detection: if a 'resolved' error got new events → flip to 'regressed'
     if (errorGroups.size > 0) {
@@ -69,4 +79,49 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
   }
 
   if (processed > 0) console.log(`[processor] total: ${processed} events processed`)
+}
+
+// Symbolicate error stacks using uploaded source maps (keyed by release)
+async function symbolicateErrorGroups(
+  db: ProcessorTurso,
+  site: string,
+  groups: Map<string, import('./types').ErrorGroup>,
+): Promise<void> {
+  // Collect distinct releases in this batch
+  const releases = new Set<string>()
+  for (const g of groups.values()) { if (g.release) releases.add(g.release) }
+  if (releases.size === 0) return
+
+  // Load source maps per release
+  const consumersByRelease = new Map<string, Map<string, ReturnType<typeof createConsumer>>>()
+  for (const release of releases) {
+    const maps = await db.getSourceMaps(site, release)
+    if (maps.length === 0) continue
+    const consumers = new Map<string, NonNullable<ReturnType<typeof createConsumer>>>()
+    for (const { filename, content } of maps) {
+      const c = createConsumer(content)
+      if (c) consumers.set(filename, c)
+    }
+    if (consumers.size > 0) consumersByRelease.set(release, consumers)
+  }
+
+  if (consumersByRelease.size === 0) return
+
+  // Apply symbolication to each error group that has a stack + matching source maps
+  for (const g of groups.values()) {
+    if (!g.stack || !g.release) continue
+    const consumers = consumersByRelease.get(g.release)
+    if (!consumers || consumers.size === 0) continue
+    const frames = symbolicateStack(g.stack, consumers)
+    if (frames.length === 0) continue
+    // Replace stack with human-readable symbolicated version
+    g.stack = frames
+      .map(f => {
+        const loc  = f.source ? `${f.source}:${f.line}:${f.column}` : 'unknown'
+        const fn   = f.fn ? `${f.fn} ` : ''
+        const snip = f.snippet ? `\n    > ${f.snippet}` : ''
+        return `  at ${fn}(${loc})${snip}`
+      })
+      .join('\n')
+  }
 }

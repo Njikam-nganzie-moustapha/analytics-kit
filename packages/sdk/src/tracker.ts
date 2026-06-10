@@ -1,4 +1,4 @@
-import type { TrackerConfig, AnalyticsEvent, PushFn } from './types'
+import type { TrackerConfig, AnalyticsEvent, PushFn, UserContext } from './types'
 import { generateId, viewport } from './utils'
 import { Transport } from './transport'
 import { startMouseTracking, stopMouseTracking } from './mouse'
@@ -73,10 +73,12 @@ export function makePush(): PushFn {
       t: Date.now(),
       sid: _sessionId,
       site: _config.siteId,
-      uid: _config.userId,
+      uid:        _config.userId,
+      user_email: _config.userContext?.email,
+      user_name:  _config.userContext?.name,
       release: _config.release,
-      url: location.href,   // captured at push time — correct for SPA
-      ...partial,           // caller's url overrides (e.g. page_view passes its own)
+      url: location.href,
+      ...partial,
     } as unknown as AnalyticsEvent
     if (_config.debug) console.debug('[analytics-kit]', event.type, event)
     _transport.push(event)
@@ -87,6 +89,22 @@ export function identify(userId: string, traits?: Record<string, unknown>): void
   if (!_config) return
   _config.userId = userId
   makePush()({ type: 'identify', userId, ...traits })
+}
+
+export function setUser(user: string | UserContext, traits?: Record<string, unknown>): void {
+  if (typeof user === 'string') {
+    identify(user, traits)
+  } else {
+    if (!_config) return
+    if (user.id) _config.userId = user.id
+    _config.userContext = { ..._config.userContext, ...user }
+    makePush()({ type: 'identify', userId: user.id ?? _config.userId, ...user, ...traits })
+  }
+}
+
+export function setRelease(release: string): void {
+  if (!_config) return
+  _config.release = release
 }
 
 export function track(name: string, props?: Record<string, unknown>): void {

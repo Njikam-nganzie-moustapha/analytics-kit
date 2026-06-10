@@ -1,4 +1,4 @@
-import type { RawEvent, ErrorGroup, Breadcrumb } from './types'
+import type { RawEvent, ErrorGroup, Breadcrumb, UserSample } from './types'
 
 function fingerprint(e: RawEvent): string {
   if (e.type === 'network_error') {
@@ -15,6 +15,14 @@ function fingerprint(e: RawEvent): string {
     .trim()
     .slice(0, 120)
   return `js:${msg}`
+}
+
+function parseUserSample(e: RawEvent): UserSample | undefined {
+  const id    = e.uid    != null ? String(e.uid).slice(0, 80)         : undefined
+  const email = e.user_email != null ? String(e.user_email).slice(0, 120) : undefined
+  const name  = e.user_name  != null ? String(e.user_name).slice(0, 80)  : undefined
+  if (!id && !email && !name) return undefined
+  return { id, email, name }
 }
 
 function parseBreadcrumbs(e: RawEvent): Breadcrumb[] | undefined {
@@ -40,10 +48,11 @@ export function buildErrorGroups(events: RawEvent[]): Map<string, ErrorGroup> {
       hit.count++
       hit.sessions.add(e.sid)
       hit.lastSeen = Math.max(hit.lastSeen, e.t)
-      // Keep breadcrumbs from the latest occurrence
       const crumbs = parseBreadcrumbs(e)
       if (crumbs) hit.breadcrumbs = crumbs
       if (e.release) hit.release = String(e.release)
+      const user = parseUserSample(e)
+      if (user) hit.userSample = user
     } else {
       groups.set(fp, {
         fingerprint: fp,
@@ -54,6 +63,7 @@ export function buildErrorGroups(events: RawEvent[]): Map<string, ErrorGroup> {
         stack:       e.stack  != null ? String(e.stack).slice(0, 800)  : undefined,
         release:     e.release != null ? String(e.release).slice(0, 80) : undefined,
         breadcrumbs: parseBreadcrumbs(e),
+        userSample:  parseUserSample(e),
         count:       1,
         sessions:    new Set([e.sid]),
         firstSeen:   e.t,

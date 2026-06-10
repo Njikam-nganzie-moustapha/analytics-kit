@@ -5,28 +5,34 @@ import { ZoneStats       } from './components/ZoneStats'
 import { SessionList     } from './components/SessionList'
 import { ErrorList       } from './components/ErrorList'
 import { CronMonitors    } from './components/CronMonitors'
+import { SourceMapsTab   } from './components/SourceMapsTab'
+import { VitalsPanel     } from './components/VitalsPanel'
+import { OverviewPanel   } from './components/OverviewPanel'
 import { ReplayModal     } from './components/ReplayModal'
 import { LoginScreen     } from './components/LoginScreen'
 import {
   fetchHeatmap, fetchZones, fetchSessions, fetchReplay,
-  fetchErrors, fetchCronMonitors,
+  fetchErrors, fetchCronMonitors, fetchVitals,
   authStatus, clearToken, getToken,
 } from './api'
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
 
-type Tab = 'heatmap' | 'zones' | 'sessions' | 'errors' | 'cron'
+type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'vitals' | 'cron' | 'sourcemaps'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'heatmap',  label: 'Heatmap',  icon: '◈' },
-  { id: 'zones',    label: 'Zones',    icon: '⊡' },
-  { id: 'sessions', label: 'Sessions', icon: '◉' },
-  { id: 'errors',   label: 'Errors',   icon: '⊘' },
-  { id: 'cron',     label: 'Cron',     icon: '⏱' },
+  { id: 'overview',    label: 'Overview',     icon: '⬡' },
+  { id: 'heatmap',     label: 'Heatmap',      icon: '◈' },
+  { id: 'zones',       label: 'Zones',        icon: '⊡' },
+  { id: 'sessions',    label: 'Sessions',     icon: '◉' },
+  { id: 'errors',      label: 'Errors',       icon: '⊘' },
+  { id: 'vitals',      label: 'Vitals',       icon: '♡' },
+  { id: 'cron',        label: 'Cron',         icon: '⏱' },
+  { id: 'sourcemaps',  label: 'Source Maps',  icon: '⊞' },
 ]
 
 const contentVariants = {
   initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0,  transition: { duration: 0.2, ease: 'easeOut' } },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.2, ease: 'easeOut' } },
   exit:    { opacity: 0, y: -6, transition: { duration: 0.12 } },
 }
 
@@ -50,16 +56,21 @@ export function App() {
 
   const [siteInput, setSiteInput] = useState(KNOWN_SITES[0] ?? '')
   const [urlInput,  setUrlInput]  = useState('')
-  const [tab,  setTab]  = useState<Tab>('heatmap')
+  const [tab,  setTab]  = useState<Tab>('overview')
   const [query, setQuery] = useState({ site: '', url: '' })
 
   const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState('')
+  const [loadError, setLoadError] = useState('')
+
   const [cells,    setCells]    = useState<HeatmapCell[]>([])
   const [zones,    setZones]    = useState<ZoneRow[]>([])
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [errors,   setErrors]   = useState<ErrorGroup[]>([])
   const [monitors, setMonitors] = useState<CronMonitor[]>([])
+  const [vitals,   setVitals]   = useState<VitalRow[]>([])
+
+  // For overview, prefetch sessions + errors + vitals in parallel
+  const [overviewReady, setOverviewReady] = useState(false)
 
   const [replaySid,     setReplaySid]     = useState('')
   const [replayEvents,  setReplayEvents]  = useState<unknown[]>([])
@@ -71,25 +82,32 @@ export function App() {
     catch { setReplayEvents([]) }
     finally { setReplayLoading(false) }
   }
-
   function closeReplay() { setReplaySid(''); setReplayEvents([]) }
 
   const load = useCallback(async (q: { site: string; url: string }, t: Tab) => {
     if (!q.site) return
     setLoading(true)
-    setError('')
+    setLoadError('')
     try {
+      if (t === 'overview') {
+        const [s, e, v] = await Promise.all([
+          fetchSessions(q.site, { limit: 200 }),
+          fetchErrors(q.site, { limit: 200 }),
+          fetchVitals(q.site),
+        ])
+        setSessions(s); setErrors(e); setVitals(v)
+        setOverviewReady(true)
+      }
       if (t === 'heatmap')  setCells(await fetchHeatmap(q.site, q.url || undefined))
       if (t === 'zones')    setZones(await fetchZones(q.site, q.url || undefined))
       if (t === 'sessions') setSessions(await fetchSessions(q.site, { limit: 200 }))
       if (t === 'errors')   setErrors(await fetchErrors(q.site, { limit: 200 }))
-      if (t === 'cron')     setMonitors(await fetchCronMonitors(q.site))
+      if (t === 'vitals')   setVitals(await fetchVitals(q.site, q.url || undefined))
+      if (t === 'cron')        setMonitors(await fetchCronMonitors(q.site))
+      // sourcemaps tab fetches its own data internally (no global state needed)
     } catch (e: unknown) {
-      if ((e as { status?: number }).status === 401) {
-        setAuthenticated(false)
-        return
-      }
-      setError(String(e))
+      if ((e as { status?: number }).status === 401) { setAuthenticated(false); return }
+      setLoadError(String(e))
     } finally {
       setLoading(false)
     }
@@ -105,7 +123,6 @@ export function App() {
     load(q, tab)
   }
 
-  // Optimistic update for error status/assignee changes
   function handleErrorUpdate(fp: string, update: Partial<ErrorGroup>) {
     setErrors(prev => prev.map(e => e.fingerprint === fp ? { ...e, ...update } : e))
   }
@@ -121,36 +138,39 @@ export function App() {
         <span>Loading…</span>
       </div>
     )
-    if (error) return (
+    if (loadError) return (
       <div className="empty">
         <span className="empty-title" style={{ color: 'var(--error)' }}>Request failed</span>
-        <span>{error}</span>
+        <span>{loadError}</span>
       </div>
+    )
+    if (tab === 'overview') return (
+      <OverviewPanel sessions={sessions} errors={errors} vitals={vitals} />
     )
     if (tab === 'heatmap')  return <HeatmapOverlay cells={cells} />
     if (tab === 'zones')    return <ZoneStats zones={zones} />
-    if (tab === 'sessions') return <SessionList sessions={sessions} onReplay={openReplay} />
+    if (tab === 'sessions') return <SessionList sessions={sessions} site={query.site} onReplay={openReplay} />
     if (tab === 'errors')   return (
       <ErrorList errors={errors} site={query.site} onUpdate={handleErrorUpdate} />
     )
-    if (tab === 'cron') return (
+    if (tab === 'vitals')   return <VitalsPanel vitals={vitals} />
+    if (tab === 'cron')       return (
       <CronMonitors
         monitors={monitors}
         site={query.site}
         onDelete={id => setMonitors(prev => prev.filter(m => m.monitorId !== id))}
       />
     )
+    if (tab === 'sourcemaps') return <SourceMapsTab site={query.site} />
   }
 
   if (!authChecked) return null
-
   if (authRequired && !authenticated) {
     return <LoginScreen onSuccess={() => setAuthenticated(true)} />
   }
 
   return (
     <div className="app">
-      {/* Header */}
       <header className="header">
         <span className="header-logo">analytics<span>kit</span></span>
         <div className="header-form">
@@ -186,7 +206,6 @@ export function App() {
         </div>
       </header>
 
-      {/* Site quick-select chips */}
       {KNOWN_SITES.length > 0 && (
         <div className="site-chips">
           {KNOWN_SITES.map((s: string) => (
@@ -201,7 +220,6 @@ export function App() {
         </div>
       )}
 
-      {/* Tabs */}
       <nav className="tabs">
         {TABS.map(t => (
           <button
@@ -222,7 +240,6 @@ export function App() {
         ))}
       </nav>
 
-      {/* Content */}
       <main className="content">
         {!query.site ? (
           <div className="empty">

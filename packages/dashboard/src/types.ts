@@ -41,6 +41,17 @@ export interface ErrorGroup {
   note: string | null
 }
 
+export interface VitalRow {
+  site:     string
+  url:      string
+  metric:   string
+  good:     number
+  needsImp: number
+  poor:     number
+  avg:      number
+  total:    number
+}
+
 export interface CronMonitor {
   monitorId: string
   site: string

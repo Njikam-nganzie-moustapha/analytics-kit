@@ -8,6 +8,44 @@ import { isBotUA, isFilteredEvent } from '../middleware/filter'
 
 const MAX_EVENTS_PER_BATCH = 200
 
+// Per-fingerprint error cap: max N occurrences per window
+const FP_MAX     = parseInt(process.env.ERROR_FP_MAX_PER_WINDOW ?? '50')
+const FP_WINDOW  = parseInt(process.env.ERROR_FP_WINDOW_MS      ?? '60000') // 1 min
+
+const ERROR_TYPES = new Set(['js_error', 'network_error'])
+
+// fingerprint → { count, windowStart }
+const fpCounts = new Map<string, { count: number; windowStart: number }>()
+
+function errorFingerprint(e: AnalyticsEvent): string {
+  const p = (e as Record<string, unknown>).payload
+  const inner = typeof p === 'object' && p !== null ? (p as Record<string, unknown>) : (e as Record<string, unknown>)
+  const msg = String(inner.msg ?? inner.message ?? e.type ?? '').slice(0, 120)
+  return `${e.site ?? ''}|${e.type}|${msg}`
+}
+
+function isRateLimited(fp: string, now: number): boolean {
+  let entry = fpCounts.get(fp)
+  if (!entry || now - entry.windowStart > FP_WINDOW) {
+    fpCounts.set(fp, { count: 1, windowStart: now })
+    return false
+  }
+  entry.count++
+  if (entry.count > FP_MAX) return true
+  fpCounts.set(fp, entry)
+  return false
+}
+
+// Evict stale entries occasionally to prevent unbounded growth
+let lastEvict = Date.now()
+function maybeEvict(now: number) {
+  if (now - lastEvict < FP_WINDOW * 5) return
+  lastEvict = now
+  for (const [k, v] of fpCounts) {
+    if (now - v.windowStart > FP_WINDOW) fpCounts.delete(k)
+  }
+}
+
 function isValidEvent(e: unknown): e is AnalyticsEvent {
   if (!e || typeof e !== 'object') return false
   const ev = e as Record<string, unknown>
@@ -23,7 +61,6 @@ export function eventsRouter(queue: Queue): Hono {
   // POST /e — main ingest endpoint
   // Body: JSON array | compressed string (X-Compressed: 1)
   r.post('/', async c => {
-    // Drop bot traffic at request level (before parsing body)
     const ua = c.req.header('user-agent') ?? ''
     if (isBotUA(ua)) return c.body(null, 204)
 
@@ -42,10 +79,17 @@ export function eventsRouter(queue: Queue): Hono {
         events = Array.isArray(parsed) ? parsed : [parsed]
       }
 
+      const now = Date.now()
+      maybeEvict(now)
+
       const valid = events
         .slice(0, MAX_EVENTS_PER_BATCH)
         .filter(isValidEvent)
-        .filter(e => !isFilteredEvent(e))  // drop extension errors etc.
+        .filter(e => !isFilteredEvent(e))
+        .filter(e => {
+          if (!ERROR_TYPES.has(e.type)) return true
+          return !isRateLimited(errorFingerprint(e), now)
+        })
 
       if (valid.length === 0) return c.body(null, 204)
 
@@ -56,7 +100,6 @@ export function eventsRouter(queue: Queue): Hono {
     }
   })
 
-  // GET /e/health — queue depth (for dashboards / alerting)
   r.get('/health', c => c.json({ ok: true, queued: queue.size() }))
 
   return r

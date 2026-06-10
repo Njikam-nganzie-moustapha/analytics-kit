@@ -6,6 +6,8 @@ export interface RawEvent {
   uid?: string
   url?: string
   release?: string
+  user_email?: string
+  user_name?: string
   x?: number
   y?: number
   vpW?: number
@@ -51,6 +53,13 @@ export interface SessionStat {
   urlCount: number
   eventCount: number
   hasReplay: boolean
+  hasError: boolean
+}
+
+export interface UserSample {
+  id?: string
+  email?: string
+  name?: string
 }
 
 export interface ErrorGroup {
@@ -62,6 +71,7 @@ export interface ErrorGroup {
   stack?: string
   release?: string
   breadcrumbs?: Breadcrumb[]
+  userSample?: UserSample
   count: number
   sessions: Set<string>
   firstSeen: number

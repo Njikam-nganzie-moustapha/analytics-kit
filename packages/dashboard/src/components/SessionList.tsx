@@ -1,13 +1,17 @@
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { AnimatedNumber } from './AnimatedNumber'
 import type { SessionRow } from '../types'
+import { fetchSessionErrors } from '../api'
 
 type SortKey = 'started' | 'duration' | 'urlCount' | 'eventCount'
 type Dir     = 'desc' | 'asc'
 
+type SessionError = { type: string; msg: string; url: string | null; ts: number }
+
 interface Props {
   sessions:  SessionRow[]
+  site:      string
   onReplay?: (sid: string) => void
 }
 
@@ -27,19 +31,45 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+function fmtTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+const ERROR_TYPE_ICON: Record<string, string> = {
+  js_error:      '🔴',
+  network_error: '🟠',
+}
+
 const tbody = {
   hidden: {},
   show:   { transition: { staggerChildren: 0.03, delayChildren: 0.05 } },
 }
-const row = {
+const rowVariant = {
   hidden: { opacity: 0, y: 6 },
   show:   { opacity: 1, y: 0, transition: { duration: 0.2, ease: 'easeOut' } },
 }
 
-export function SessionList({ sessions, onReplay }: Props) {
+export function SessionList({ sessions, site, onReplay }: Props) {
   const [sortKey,    setSortKey]    = useState<SortKey>('started')
   const [dir,        setDir]        = useState<Dir>('desc')
   const [replayOnly, setReplayOnly] = useState(false)
+
+  // expanded session → its errors (undefined = never fetched, null = loading, [] = loaded)
+  const [expanded,      setExpanded]      = useState<string | null>(null)
+  const [sessionErrors, setSessionErrors] = useState<Record<string, SessionError[] | null | undefined>>({})
+
+  const toggleExpand = useCallback(async (sid: string) => {
+    if (expanded === sid) { setExpanded(null); return }
+    setExpanded(sid)
+    if (sessionErrors[sid] !== undefined) return  // already fetched
+    setSessionErrors(prev => ({ ...prev, [sid]: null }))  // null = loading
+    try {
+      const errs = await fetchSessionErrors(sid, site)
+      setSessionErrors(prev => ({ ...prev, [sid]: errs }))
+    } catch {
+      setSessionErrors(prev => ({ ...prev, [sid]: [] }))
+    }
+  }, [expanded, sessionErrors, site])
 
   if (sessions.length === 0) {
     return (
@@ -123,6 +153,7 @@ export function SessionList({ sessions, onReplay }: Props) {
         <table>
           <thead>
             <tr>
+              <th style={{ width: 20 }} />
               <th>Session</th>
               <Th k="started"    label="Started"  />
               <Th k="duration"   label="Duration"  right />
@@ -132,23 +163,97 @@ export function SessionList({ sessions, onReplay }: Props) {
             </tr>
           </thead>
           <motion.tbody variants={tbody} initial="hidden" animate="show">
-            {sorted.map(s => (
-              <motion.tr key={s.sid} variants={row}>
-                <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-2)' }}>
-                  {s.sid.slice(0, 10)}<span style={{ opacity: .4 }}>…</span>
-                </td>
-                <td title={new Date(s.started).toLocaleString()}>{timeAgo(s.started)}</td>
-                <td className="col-r">{fmtDuration(s.duration)}</td>
-                <td className="col-r">{s.urlCount}</td>
-                <td className="col-r">{s.eventCount.toLocaleString()}</td>
-                <td>
-                  {s.hasReplay
-                    ? <button className="play-btn" onClick={() => onReplay?.(s.sid)}>▶ Play</button>
-                    : <span className="badge badge-gray">—</span>
-                  }
-                </td>
-              </motion.tr>
-            ))}
+            {sorted.map(s => {
+              const isOpen  = expanded === s.sid
+              const errs    = sessionErrors[s.sid]
+              const loading = errs === null
+              const errList = Array.isArray(errs) ? errs : []
+
+              return (
+                <>
+                  <motion.tr
+                    key={s.sid}
+                    variants={rowVariant}
+                    onClick={() => toggleExpand(s.sid)}
+                    style={{ cursor: 'pointer', background: isOpen ? 'var(--surface-1)' : undefined }}
+                  >
+                    <td style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: 10, userSelect: 'none' }}>
+                      {isOpen ? '▾' : '▸'}
+                    </td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-2)' }}>
+                      {s.sid.slice(0, 10)}<span style={{ opacity: .4 }}>…</span>
+                      {errList.length > 0 && (
+                        <span className="badge badge-error" style={{ marginLeft: 6, fontSize: 10 }}>
+                          {errList.length} err
+                        </span>
+                      )}
+                    </td>
+                    <td title={new Date(s.started).toLocaleString()}>{timeAgo(s.started)}</td>
+                    <td className="col-r">{fmtDuration(s.duration)}</td>
+                    <td className="col-r">{s.urlCount}</td>
+                    <td className="col-r">{s.eventCount.toLocaleString()}</td>
+                    <td onClick={e => e.stopPropagation()}>
+                      {s.hasReplay
+                        ? <button className="play-btn" onClick={() => onReplay?.(s.sid)}>▶ Play</button>
+                        : <span className="badge badge-gray">—</span>
+                      }
+                    </td>
+                  </motion.tr>
+
+                  <AnimatePresence>
+                    {isOpen && (
+                      <motion.tr
+                        key={`${s.sid}-detail`}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                      >
+                        <td colSpan={7} style={{ padding: 0, background: 'var(--surface-0)' }}>
+                          <div className="session-errors-wrap">
+                            {loading ? (
+                              <span className="session-errors-loading">Loading errors…</span>
+                            ) : errList.length === 0 ? (
+                              <span className="session-errors-empty">No errors in this session</span>
+                            ) : (
+                              <table className="session-errors-table">
+                                <thead>
+                                  <tr>
+                                    <th>Type</th>
+                                    <th>Message</th>
+                                    <th>URL</th>
+                                    <th>Time</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {errList.map((e, i) => (
+                                    <tr key={i}>
+                                      <td>
+                                        <span style={{ marginRight: 4 }}>{ERROR_TYPE_ICON[e.type] ?? '⚪'}</span>
+                                        <code style={{ fontSize: 11 }}>{e.type}</code>
+                                      </td>
+                                      <td style={{ maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {e.msg}
+                                      </td>
+                                      <td style={{ color: 'var(--text-2)', fontSize: 11 }}>
+                                        {e.url ? e.url.replace(/^https?:\/\/[^/]+/, '') : '—'}
+                                      </td>
+                                      <td style={{ color: 'var(--text-2)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                                        {fmtTime(e.ts)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        </td>
+                      </motion.tr>
+                    )}
+                  </AnimatePresence>
+                </>
+              )
+            })}
           </motion.tbody>
         </table>
       </div>

@@ -6,6 +6,23 @@ type TursoReq =
 const int = (v: number): TursoArg => ({ type: 'integer', value: String(v) })
 const str = (v: string): TursoArg => ({ type: 'text',    value: v })
 
+// Parse "2024-01-15:12,2024-01-14:3" into [0,0,...,3,12] (14 slots, ascending by date)
+function parseDailyStats(raw: string): number[] {
+  const slots = new Array<number>(14).fill(0)
+  if (!raw) return slots
+  const today = new Date().toISOString().slice(0, 10)
+  for (const part of raw.split(',')) {
+    const idx = part.indexOf(':')
+    if (idx < 0) continue
+    const date  = part.slice(0, idx)
+    const count = parseInt(part.slice(idx + 1)) || 0
+    const daysAgo = Math.round((Date.parse(today) - Date.parse(date)) / 86400_000)
+    const slot    = 13 - daysAgo
+    if (slot >= 0 && slot < 14) slots[slot] = count
+  }
+  return slots
+}
+
 function toRows(result: unknown): Record<string, string | null>[] {
   const r = result as {
     response?: {
@@ -50,6 +67,8 @@ export interface ErrorGroupRow {
   stack: string | null
   release: string | null
   breadcrumbs: string | null      // raw JSON string
+  userSample: string | null       // raw JSON string {id,email,name}
+  recentCounts: number[]          // last 14 days, index 0 = 13 days ago, 13 = today
   count: number
   sessions: number
   firstSeen: number
@@ -58,6 +77,34 @@ export interface ErrorGroupRow {
   status: string
   assignee: string | null
   note: string | null
+}
+
+export interface ErrorOccurrence {
+  ts:      number
+  url:     string | null
+  stack:   string | null
+  user:    string | null
+  sid:     string | null
+  release: string | null
+}
+
+export interface VitalRow {
+  site:     string
+  url:      string
+  metric:   string
+  good:     number
+  needsImp: number
+  poor:     number
+  avg:      number
+  total:    number
+}
+
+export interface SourceMapMeta {
+  site:        string
+  release:     string
+  filename:    string
+  size:        number
+  uploadedAt:  number
 }
 
 export interface CronMonitorRow {
@@ -108,16 +155,18 @@ export class QueryTurso {
 
   async getSessions(
     site: string,
-    opts: { from?: number; to?: number; limit?: number; hasReplay?: boolean } = {},
+    opts: { from?: number; to?: number; limit?: number; hasReplay?: boolean; hasError?: boolean; urlContains?: string } = {},
   ): Promise<SessionRow[]> {
     const conds = ['site = ?']
     const args: TursoArg[] = [str(site)]
-    if (opts.from !== undefined)  { conds.push('started >= ?'); args.push(int(opts.from)) }
-    if (opts.to   !== undefined)  { conds.push('started <= ?'); args.push(int(opts.to))   }
-    if (opts.hasReplay)           { conds.push('has_replay = 1')                           }
+    if (opts.from !== undefined)    { conds.push('started >= ?');          args.push(int(opts.from)) }
+    if (opts.to   !== undefined)    { conds.push('started <= ?');          args.push(int(opts.to))   }
+    if (opts.hasReplay)             { conds.push('has_replay = 1')                                   }
+    if (opts.hasError)              { conds.push('has_error = 1')                                    }
+    if (opts.urlContains)           { conds.push('url_sample LIKE ?');     args.push(str(`%${opts.urlContains.replace(/%/g, '\\%')}%`)) }
 
     const limit = Math.min(opts.limit ?? 100, 500)
-    const sql = `SELECT sid, site, uid, started, ended, duration, url_count, event_count, has_replay
+    const sql = `SELECT sid, site, uid, started, ended, duration, url_count, event_count, has_replay, COALESCE(has_error, 0) AS has_error
                  FROM sessions
                  WHERE ${conds.join(' AND ')}
                  ORDER BY started DESC
@@ -130,52 +179,94 @@ export class QueryTurso {
       started: parseInt(r.started!), ended: parseInt(r.ended!), duration: parseInt(r.duration!),
       urlCount: parseInt(r.url_count!), eventCount: parseInt(r.event_count!),
       hasReplay: r.has_replay === '1',
+      hasError:  r.has_error === '1',
     }))
   }
 
   async getErrorGroups(
     site: string,
-    opts: { from?: number; to?: number; limit?: number; status?: string } = {},
+    opts: { from?: number; to?: number; limit?: number; status?: string; query?: string } = {},
   ): Promise<ErrorGroupRow[]> {
     const conds = ['eg.site = ?']
     const args: TursoArg[] = [str(site)]
     if (opts.from   !== undefined) { conds.push('eg.last_seen >= ?');   args.push(int(opts.from)) }
     if (opts.to     !== undefined) { conds.push('eg.first_seen <= ?');  args.push(int(opts.to))   }
-    if (opts.status !== undefined) { conds.push('COALESCE(es.status, \'open\') = ?'); args.push(str(opts.status)) }
+    if (opts.status !== undefined) { conds.push("COALESCE(es.status, 'open') = ?"); args.push(str(opts.status)) }
+    if (opts.query)                { conds.push('eg.message LIKE ?');   args.push(str(`%${opts.query.replace(/%/g, '\\%').slice(0, 80)}%`)) }
 
     const limit = Math.min(opts.limit ?? 100, 500)
     const sql = `SELECT
                    eg.fingerprint, eg.site, eg.message, eg.event_type,
-                   eg.source, eg.stack, eg.release, eg.breadcrumbs,
+                   eg.source, eg.stack, eg.release, eg.breadcrumbs, eg.user_sample,
                    eg.count, eg.sessions, eg.first_seen, eg.last_seen,
                    COALESCE(es.status, 'open') AS status,
-                   es.assignee, es.note
+                   es.assignee, es.note,
+                   (SELECT GROUP_CONCAT(d.date || ':' || d.count, ',')
+                    FROM (SELECT date, count FROM error_daily_stats
+                          WHERE site = eg.site AND fingerprint = eg.fingerprint
+                          ORDER BY date DESC LIMIT 14) d) AS daily_stats
                  FROM error_groups eg
                  LEFT JOIN error_states es
                    ON es.site = eg.site AND es.fingerprint = eg.fingerprint
                  WHERE ${conds.join(' AND ')}
-                 ORDER BY eg.count DESC
+                 ORDER BY eg.last_seen DESC
                  LIMIT ?`
     args.push(int(limit))
 
     const rows = await this._query(sql, args)
     return rows.map(r => ({
-      fingerprint: r.fingerprint!,
-      site:        r.site!,
-      message:     r.message!,
-      eventType:   r.event_type!,
-      source:      r.source ?? null,
-      stack:       r.stack  ?? null,
-      release:     r.release ?? null,
-      breadcrumbs: r.breadcrumbs ?? null,
-      count:       parseInt(r.count!),
-      sessions:    parseInt(r.sessions!),
-      firstSeen:   parseInt(r.first_seen!),
-      lastSeen:    parseInt(r.last_seen!),
-      status:      r.status ?? 'open',
-      assignee:    r.assignee ?? null,
-      note:        r.note ?? null,
+      fingerprint:  r.fingerprint!,
+      site:         r.site!,
+      message:      r.message!,
+      eventType:    r.event_type!,
+      source:       r.source ?? null,
+      stack:        r.stack  ?? null,
+      release:      r.release ?? null,
+      breadcrumbs:  r.breadcrumbs ?? null,
+      userSample:   r.user_sample ?? null,
+      recentCounts: parseDailyStats(r.daily_stats ?? ''),
+      count:        parseInt(r.count!),
+      sessions:     parseInt(r.sessions!),
+      firstSeen:    parseInt(r.first_seen!),
+      lastSeen:     parseInt(r.last_seen!),
+      status:       r.status ?? 'open',
+      assignee:     r.assignee ?? null,
+      note:         r.note ?? null,
     }))
+  }
+
+  async getErrorEvents(site: string, fingerprint: string, limit = 25): Promise<ErrorOccurrence[]> {
+    // Get the group's message + type for matching
+    const meta = await this._query(
+      'SELECT message, event_type FROM error_groups WHERE site = ? AND fingerprint = ?',
+      [str(site), str(fingerprint)],
+    )
+    if (meta.length === 0) return []
+    const msgHint = (meta[0].message ?? '').slice(0, 50).replace(/[%_[\]\\]/g, '\\$&')
+    const evType  = meta[0].event_type ?? 'js_error'
+
+    const rows = await this._query(
+      `SELECT payload, t FROM analytics_events
+       WHERE site = ? AND type = ? AND payload LIKE ?
+       ORDER BY t DESC LIMIT ?`,
+      [str(site), str(evType), str(`%${msgHint}%`), int(limit)],
+    )
+
+    return rows.flatMap(r => {
+      if (!r.payload) return []
+      try {
+        const p = JSON.parse(r.payload) as Record<string, unknown>
+        const inner = (typeof p.payload === 'object' && p.payload !== null ? p.payload : p) as Record<string, unknown>
+        return [{
+          ts:      parseInt(r.t ?? '0'),
+          url:     typeof inner.url  === 'string' ? inner.url.slice(0, 200)  : null,
+          stack:   typeof inner.stack === 'string' ? inner.stack.slice(0, 600) : null,
+          user:    typeof p.uid === 'string' ? p.uid.slice(0, 80) : null,
+          sid:     typeof p.sid === 'string' ? p.sid.slice(0, 50) : null,
+          release: typeof p.release === 'string' ? p.release.slice(0, 80) : null,
+        }]
+      } catch { return [] }
+    })
   }
 
   async updateErrorState(
@@ -207,6 +298,73 @@ export class QueryTurso {
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (site, fingerprint) DO UPDATE SET ${setClauses.join(', ')}`,
       [...insertArgs, ...setArgs],
+    )
+  }
+
+  // ── Vitals ───────────────────────────────────────────────────────────────────
+
+  async getVitals(site: string, url?: string): Promise<VitalRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (url !== undefined) { conds.push('url = ?'); args.push(str(url)) }
+
+    const sql = `SELECT site, url, metric, good, needs_imp, poor, sum_value, total
+                 FROM vitals_summary
+                 WHERE ${conds.join(' AND ')}
+                 ORDER BY metric, url`
+    const rows = await this._query(sql, args)
+    return rows.map(r => {
+      const total    = parseInt(r.total ?? '0') || 1
+      const sumValue = parseFloat(r.sum_value ?? '0')
+      return {
+        site:     r.site!,
+        url:      r.url!,
+        metric:   r.metric!,
+        good:     parseInt(r.good ?? '0'),
+        needsImp: parseInt(r.needs_imp ?? '0'),
+        poor:     parseInt(r.poor ?? '0'),
+        avg:      Math.round(sumValue / total * 10) / 10,
+        total,
+      }
+    })
+  }
+
+  // ── Source maps ───────────────────────────────────────────────────────────────
+
+  async upsertSourceMap(site: string, release: string, filename: string, content: string): Promise<void> {
+    await this._execute(
+      `INSERT INTO sourcemaps (release, filename, site, content, size, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (site, release, filename) DO UPDATE SET
+         content = excluded.content,
+         size    = excluded.size,
+         uploaded_at = excluded.uploaded_at`,
+      [str(release), str(filename), str(site), str(content), int(content.length), int(Date.now())],
+    )
+  }
+
+  async listSourceMaps(site: string, release = ''): Promise<SourceMapMeta[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (release) { conds.push('release = ?'); args.push(str(release)) }
+
+    const rows = await this._query(
+      `SELECT site, release, filename, size, uploaded_at FROM sourcemaps WHERE ${conds.join(' AND ')} ORDER BY uploaded_at DESC`,
+      args,
+    )
+    return rows.map(r => ({
+      site:       r.site!,
+      release:    r.release!,
+      filename:   r.filename!,
+      size:       parseInt(r.size ?? '0'),
+      uploadedAt: parseInt(r.uploaded_at ?? '0'),
+    }))
+  }
+
+  async deleteSourceMap(site: string, release: string, filename: string): Promise<void> {
+    await this._execute(
+      'DELETE FROM sourcemaps WHERE site = ? AND release = ? AND filename = ?',
+      [str(site), str(release), str(filename)],
     )
   }
 
@@ -243,6 +401,30 @@ export class QueryTurso {
       'DELETE FROM cron_monitors WHERE monitor_id = ? AND site = ?',
       [str(monitorId), str(site)],
     )
+  }
+
+  // ── Session errors ────────────────────────────────────────────────────────────
+  // Returns distinct error events that occurred during a session, ordered by time.
+  async getSessionErrors(sid: string, site: string): Promise<{ type: string; msg: string; url: string | null; ts: number }[]> {
+    const sql = `SELECT type, payload, t
+                 FROM analytics_events
+                 WHERE sid = ? AND site = ? AND type IN ('js_error', 'network_error')
+                 ORDER BY t ASC
+                 LIMIT 200`
+    const rows = await this._query(sql, [str(sid), str(site)])
+    return rows.flatMap(r => {
+      if (!r.payload) return []
+      try {
+        const p = JSON.parse(r.payload) as Record<string, unknown>
+        const inner = (p.payload ?? p) as Record<string, unknown>
+        return [{
+          type: String(r.type ?? inner.type ?? 'js_error'),
+          msg:  String(inner.msg ?? inner.url ?? '').slice(0, 200),
+          url:  typeof inner.url === 'string' ? inner.url.slice(0, 200) : null,
+          ts:   parseInt(r.t ?? '0'),
+        }]
+      } catch { return [] }
+    })
   }
 
   async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
@@ -285,6 +467,33 @@ export class QueryTurso {
       { type: 'close' },
     ]
     await this._pipeline(stmts)
+
+    // vitals + sourcemaps tables
+    const extra: TursoReq[] = [
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS vitals_summary (
+          site      TEXT NOT NULL,
+          url       TEXT NOT NULL,
+          metric    TEXT NOT NULL,
+          good      INTEGER NOT NULL DEFAULT 0,
+          needs_imp INTEGER NOT NULL DEFAULT 0,
+          poor      INTEGER NOT NULL DEFAULT 0,
+          sum_value REAL NOT NULL DEFAULT 0,
+          total     INTEGER NOT NULL DEFAULT 0,
+          updated   INTEGER NOT NULL,
+          PRIMARY KEY (site, url, metric)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS sourcemaps (
+          release     TEXT NOT NULL,
+          filename    TEXT NOT NULL,
+          site        TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          size        INTEGER NOT NULL DEFAULT 0,
+          uploaded_at INTEGER NOT NULL,
+          PRIMARY KEY (site, release, filename)
+        )` }},
+      { type: 'close' },
+    ]
+    await this._pipeline(extra)
 
     // Migrations for error_groups columns that may not exist yet
     for (const col of ['release TEXT', 'breadcrumbs TEXT']) {

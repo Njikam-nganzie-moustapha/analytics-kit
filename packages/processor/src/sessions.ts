@@ -36,6 +36,7 @@ export function buildSessionStats(events: RawEvent[]): SessionStat[] {
       urlCount:   urls.size,
       eventCount: evs.length,
       hasReplay:  evs.some(e => e.type === 'rrweb_chunk'),
+      hasError:   evs.some(e => e.type === 'js_error' || e.type === 'network_error'),
     })
   }
 

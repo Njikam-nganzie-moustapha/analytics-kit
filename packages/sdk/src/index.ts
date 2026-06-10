@@ -1,14 +1,14 @@
-import { init, identify, track, destroy } from './tracker'
-import type { TrackerConfig, ZoneDef, AnalyticsEvent } from './types'
+import { init, identify, setUser, setRelease, track, destroy } from './tracker'
+import { addBreadcrumb } from './breadcrumbs'
+import type { TrackerConfig, ZoneDef, AnalyticsEvent, UserContext } from './types'
 
-// API publique du SDK
-const Tracker = { init, identify, track, destroy }
+const Tracker = { init, identify, setUser, setRelease, track, destroy, addBreadcrumb }
 
-// Expose en global pour les <script> tags (UMD build)
+// Expose as global for <script> tag (UMD)
 if (typeof window !== 'undefined') {
   ;(window as unknown as Record<string, unknown>)['Tracker'] = Tracker
 }
 
 export default Tracker
-export { init, identify, track, destroy }
-export type { TrackerConfig, ZoneDef, AnalyticsEvent }
+export { init, identify, setUser, setRelease, track, destroy, addBreadcrumb }
+export type { TrackerConfig, ZoneDef, AnalyticsEvent, UserContext }

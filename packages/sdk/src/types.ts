@@ -37,11 +37,19 @@ export interface ZoneDef {
   }
 }
 
+export interface UserContext {
+  id?:    string
+  email?: string
+  name?:  string
+  [key: string]: unknown
+}
+
 export interface TrackerConfig {
   siteId: string
   collectorUrl: string
   zones?: ZoneDef[]
   userId?: string
+  userContext?: UserContext
   release?: string          // version deployée, ex: "1.4.2" ou commit SHA
   replay?: boolean          // default: true
   compress?: boolean        // default: true

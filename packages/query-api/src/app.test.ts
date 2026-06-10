@@ -10,18 +10,21 @@ beforeAll(() => {
 
 function makeDb(): QueryTurso {
   return {
-    getHeatmapCells: async () => [
-      { site: 'test', url: '/page', gx: 1, gy: 2, count: 5 },
-    ],
-    getZoneStats: async () => [
-      { site: 'test', zoneId: 'hero', url: '/page', enters: 10, clicks: 3, totalDwell: 5000, samples: 5 },
-    ],
-    getSessions: async () => [
-      { sid: 'abc', site: 'test', uid: null, started: 1000, ended: 5000, duration: 4000, urlCount: 2, eventCount: 10, hasReplay: false },
-    ],
-    getReplayEvents: async () => [{ type: 2, data: {}, timestamp: 1000 }],
-    getErrorGroups: async () => [],
-    init: async () => {},
+    getHeatmapCells:  async () => [{ site: 'test', url: '/page', gx: 1, gy: 2, count: 5 }],
+    getZoneStats:     async () => [{ site: 'test', zoneId: 'hero', url: '/page', enters: 10, clicks: 3, avgDwell: 1000 }],
+    getSessions:      async () => [{ sid: 'abc', site: 'test', uid: null, started: 1000, ended: 5000, duration: 4000, urlCount: 2, eventCount: 10, hasReplay: false }],
+    getReplayEvents:  async () => [{ t: 1000, type: 'rrweb' }],
+    getErrorGroups:   async () => [],
+    getSessionErrors: async () => [],
+    getVitals:        async () => [],
+    updateErrorState: async () => {},
+    upsertSourceMap:  async () => {},
+    listSourceMaps:   async () => [],
+    deleteSourceMap:  async () => {},
+    upsertCronCheckin: async () => {},
+    getCronMonitors:  async () => [],
+    deleteCronMonitor: async () => {},
+    ensureSchema:     async () => {},
   } as unknown as QueryTurso
 }
 

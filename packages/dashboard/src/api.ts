@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -110,11 +110,63 @@ export async function fetchCronMonitors(site: string): Promise<CronMonitor[]> {
   return data.monitors ?? []
 }
 
+export async function fetchVitals(site: string, url?: string): Promise<VitalRow[]> {
+  const q = new URLSearchParams({ site })
+  if (url) q.set('url', url)
+  const res  = await apiFetch(`${BASE}/vitals?${q}`, { headers: hdrs() })
+  const data = await res.json() as { vitals: VitalRow[] }
+  return data.vitals ?? []
+}
+
+export async function fetchSessionErrors(
+  sid: string,
+  site: string,
+): Promise<{ type: string; msg: string; url: string | null; ts: number }[]> {
+  const q = new URLSearchParams({ site })
+  const res  = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sid)}/errors?${q}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { errors: { type: string; msg: string; url: string | null; ts: number }[] }
+  return data.errors ?? []
+}
+
 export async function deleteCronMonitor(monitorId: string, site: string): Promise<void> {
   await apiFetch(
     `${BASE}/cron/${encodeURIComponent(monitorId)}?site=${encodeURIComponent(site)}`,
     { method: 'DELETE', headers: hdrs() },
   )
+}
+
+// ── Source maps ───────────────────────────────────────────────────────────────
+
+export interface SourceMapMeta {
+  site: string; release: string; filename: string; size: number; uploadedAt: number
+}
+
+export async function fetchSourceMaps(site: string, release?: string): Promise<SourceMapMeta[]> {
+  const q = new URLSearchParams({ site })
+  if (release) q.set('release', release)
+  const res  = await apiFetch(`${BASE}/sourcemaps?${q}`, { headers: hdrs() })
+  const data = await res.json() as { maps: SourceMapMeta[] }
+  return data.maps ?? []
+}
+
+export async function uploadSourceMap(
+  site: string,
+  release: string,
+  filename: string,
+  content: string,
+): Promise<void> {
+  const q = new URLSearchParams({ site, release, filename })
+  await apiFetch(`${BASE}/sourcemaps?${q}`, {
+    method:  'POST',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body:    content,
+  })
+}
+
+export async function deleteSourceMap(site: string, release: string, filename: string): Promise<void> {
+  const q = new URLSearchParams({ site, release, filename })
+  await apiFetch(`${BASE}/sourcemaps?${q}`, { method: 'DELETE', headers: hdrs() })
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────

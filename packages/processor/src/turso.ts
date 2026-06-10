@@ -1,4 +1,5 @@
 import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup } from './types'
+import type { VitalBucket } from './vitals'
 
 type TursoArg = { type: 'text' | 'integer' | 'real' | 'null'; value: string | null }
 type TursoReq = { type: 'execute'; stmt: { sql: string; args?: TursoArg[] } } | { type: 'close' }
@@ -84,18 +85,20 @@ export class ProcessorTurso {
     const stmts: Extract<TursoReq, { type: 'execute' }>[] = stats.map(s => ({
       type: 'execute',
       stmt: {
-        sql: `INSERT INTO sessions (sid, site, uid, started, ended, duration, url_count, event_count, has_replay)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO sessions (sid, site, uid, started, ended, duration, url_count, event_count, has_replay, has_error)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT (sid) DO UPDATE SET
                 ended       = MAX(ended, excluded.ended),
                 duration    = MAX(duration, excluded.duration),
                 url_count   = MAX(url_count, excluded.url_count),
                 event_count = MAX(event_count, excluded.event_count),
-                has_replay  = MAX(has_replay, excluded.has_replay)`,
+                has_replay  = MAX(has_replay, excluded.has_replay),
+                has_error   = MAX(has_error, excluded.has_error)`,
         args: [
           str(s.sid), str(s.site), nullable(s.uid),
           int(s.started), int(s.ended), int(s.duration),
-          int(s.urlCount), int(s.eventCount), int(s.hasReplay ? 1 : 0),
+          int(s.urlCount), int(s.eventCount),
+          int(s.hasReplay ? 1 : 0), int(s.hasError ? 1 : 0),
         ],
       },
     }))
@@ -134,24 +137,27 @@ export class ProcessorTurso {
     const stmts: Extract<TursoReq, { type: 'execute' }>[] = []
     for (const g of groups.values()) {
       const crumbsJson = g.breadcrumbs ? JSON.stringify(g.breadcrumbs) : null
+      const userJson   = g.userSample  ? JSON.stringify(g.userSample)  : null
       stmts.push({
         type: 'execute',
         stmt: {
           sql: `INSERT INTO error_groups
-                  (fingerprint, site, message, event_type, source, stack, release, breadcrumbs, count, sessions, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (fingerprint, site, message, event_type, source, stack, release, breadcrumbs, user_sample, count, sessions, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (site, fingerprint) DO UPDATE SET
                   count       = count + excluded.count,
                   sessions    = sessions + excluded.sessions,
                   last_seen   = MAX(last_seen, excluded.last_seen),
                   release     = COALESCE(excluded.release, release),
-                  breadcrumbs = COALESCE(excluded.breadcrumbs, breadcrumbs)`,
+                  breadcrumbs = COALESCE(excluded.breadcrumbs, breadcrumbs),
+                  user_sample = COALESCE(excluded.user_sample, user_sample)`,
           args: [
             str(g.fingerprint), str(g.site), str(g.message), str(g.eventType),
             g.source ? str(g.source) : { type: 'null', value: null },
             g.stack  ? str(g.stack)  : { type: 'null', value: null },
-            g.release ? str(g.release) : { type: 'null', value: null },
-            crumbsJson ? str(crumbsJson) : { type: 'null', value: null },
+            g.release     ? str(g.release)     : { type: 'null', value: null },
+            crumbsJson    ? str(crumbsJson)    : { type: 'null', value: null },
+            userJson      ? str(userJson)      : { type: 'null', value: null },
             int(g.count), int(g.sessions.size),
             int(g.firstSeen), int(g.lastSeen),
           ],
@@ -159,6 +165,63 @@ export class ProcessorTurso {
       })
     }
     await this._batchedUpsert(stmts)
+  }
+
+  async upsertErrorDailyStats(groups: Map<string, ErrorGroup>): Promise<void> {
+    if (groups.size === 0) return
+    const today = new Date().toISOString().slice(0, 10)
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = [...groups.entries()].map(([fp, g]) => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO error_daily_stats (site, fingerprint, date, count) VALUES (?, ?, ?, ?)
+              ON CONFLICT (site, fingerprint, date) DO UPDATE SET count = count + excluded.count`,
+        args: [str(g.site), str(fp), str(today), int(g.count)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Vitals ───────────────────────────────────────────────────────────────────
+
+  async upsertVitalsBuckets(buckets: VitalBucket[]): Promise<void> {
+    if (buckets.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = buckets.map(b => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO vitals_summary
+                (site, url, metric, good, needs_imp, poor, sum_value, total, updated)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (site, url, metric) DO UPDATE SET
+                good      = good      + excluded.good,
+                needs_imp = needs_imp + excluded.needs_imp,
+                poor      = poor      + excluded.poor,
+                sum_value = sum_value + excluded.sum_value,
+                total     = total     + excluded.total,
+                updated   = excluded.updated`,
+        args: [
+          str(b.site), str(b.url), str(b.metric),
+          int(b.good), int(b.needsImp), int(b.poor),
+          real(b.sumValue), int(b.total),
+          int(Date.now()),
+        ],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Source maps ──────────────────────────────────────────────────────────────
+
+  async getSourceMaps(site: string, release: string): Promise<{ filename: string; content: string }[]> {
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  'SELECT filename, content FROM sourcemaps WHERE site = ? AND release = ?',
+        args: [str(site), str(release)],
+      }},
+      { type: 'close' },
+    ])
+    return this._rows(res[0])
+      .map(r => ({ filename: r.filename ?? '', content: r.content ?? '' }))
+      .filter(r => r.filename && r.content)
   }
 
   // ── Regression detection ─────────────────────────────────────────────────────
@@ -293,16 +356,53 @@ export class ProcessorTurso {
         last_checkin INTEGER,
         PRIMARY KEY (monitor_id)
       )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS vitals_summary (
+        site      TEXT NOT NULL,
+        url       TEXT NOT NULL,
+        metric    TEXT NOT NULL,
+        good      INTEGER NOT NULL DEFAULT 0,
+        needs_imp INTEGER NOT NULL DEFAULT 0,
+        poor      INTEGER NOT NULL DEFAULT 0,
+        sum_value REAL NOT NULL DEFAULT 0,
+        total     INTEGER NOT NULL DEFAULT 0,
+        updated   INTEGER NOT NULL,
+        PRIMARY KEY (site, url, metric)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS sourcemaps (
+        release    TEXT NOT NULL,
+        filename   TEXT NOT NULL,
+        site       TEXT NOT NULL,
+        content    TEXT NOT NULL,
+        size       INTEGER NOT NULL DEFAULT 0,
+        uploaded_at INTEGER NOT NULL,
+        PRIMARY KEY (site, release, filename)
+      )` }},
       { type: 'close' },
     ])
 
-    // Migrations for existing error_groups table (ignore "duplicate column" errors)
-    for (const col of ['release TEXT', 'breadcrumbs TEXT']) {
+    // error_daily_stats table
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS error_daily_stats (
+        site        TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        date        TEXT NOT NULL,
+        count       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, fingerprint, date)
+      )` }},
+      { type: 'close' },
+    ])
+
+    // Column migrations — ignore errors for columns that already exist
+    for (const col of ['release TEXT', 'breadcrumbs TEXT', 'user_sample TEXT']) {
       await this._pipeline([
         { type: 'execute', stmt: { sql: `ALTER TABLE error_groups ADD COLUMN ${col}` } },
         { type: 'close' },
-      ]).catch(() => { /* column already exists — fine */ })
+      ]).catch(() => { /* already exists */ })
     }
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0` } },
+      { type: 'close' },
+    ]).catch(() => { /* already exists */ })
   }
 
   // ── Internal ─────────────────────────────────────────────────────────────────
@@ -323,6 +423,15 @@ export class ProcessorTurso {
     if (!res.ok) throw new Error(`Turso ${res.status}: ${await res.text()}`)
     const data = await res.json() as { results: unknown[] }
     return data.results
+  }
+
+  private _rows(result: unknown): Record<string, string | null>[] {
+    const r = result as { response?: { result?: { cols: { name: string }[]; rows: { value?: unknown }[][] } } }
+    const cols = r?.response?.result?.cols ?? []
+    const rows = r?.response?.result?.rows ?? []
+    return rows.map(row =>
+      Object.fromEntries(cols.map((c, i) => [c.name, row[i]?.value != null ? String(row[i].value) : null]))
+    )
   }
 
   private _payloadRows(result: unknown): RawEvent[] {
