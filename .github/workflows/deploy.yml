@@ -6,6 +6,9 @@ on:
     types: [completed]
     branches: [master]
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-master
   cancel-in-progress: false   # never interrupt an in-flight deploy
@@ -19,10 +22,35 @@ jobs:
     steps:
       - run: echo "CI passed — proceeding with deploy"
 
+  # ── Refresh Cloudflare OAuth token ──────────────────────────────────────────
+  refresh-cf-token:
+    name: Refresh CF token
+    needs: check-ci
+    runs-on: ubuntu-latest
+    outputs:
+      oauth_token: ${{ steps.refresh.outputs.oauth_token }}
+    steps:
+      - name: Refresh OAuth token + rotate secret
+        id: refresh
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          RESP=$(curl -s -X POST "https://dash.cloudflare.com/oauth2/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=54d11594-84e4-41aa-b438-e81b8fa78ee7&grant_type=refresh_token&refresh_token=${{ secrets.CLOUDFLARE_REFRESH_TOKEN }}")
+
+          ACCESS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+          NEW_REFRESH=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['refresh_token'])")
+
+          # Rotate the stored refresh token so the next run uses the latest one
+          echo "$NEW_REFRESH" | gh secret set CLOUDFLARE_REFRESH_TOKEN --repo ${{ github.repository }}
+
+          echo "oauth_token=$ACCESS" >> "$GITHUB_OUTPUT"
+
   # ── Deploy Cloudflare Workers ────────────────────────────────────────────────
   deploy-workers:
     name: Deploy Workers
-    needs: check-ci
+    needs: refresh-cf-token
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,42 +60,39 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      # CLOUDFLARE_API_TOKEN must be a permanent Cloudflare API Token (not OAuth).
-      # Create one at: dash.cloudflare.com → My Profile → API Tokens → "Edit Cloudflare Workers" template
-      # Then: gh secret set CLOUDFLARE_API_TOKEN --body "<token>" --repo Njikam-nganzie-moustapha/analytics-kit
       - name: Deploy collector worker
         run: bunx wrangler deploy
         working-directory: packages/collector
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set collector secrets
         working-directory: packages/collector
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          echo "${{ secrets.TURSO_URL }}"        | bunx wrangler secret put TURSO_URL
-          echo "${{ secrets.TURSO_TOKEN }}"      | bunx wrangler secret put TURSO_TOKEN
-          echo "${{ secrets.ANALYTICS_SITE_KEY }}" | bunx wrangler secret put SITE_KEYS
+          echo "${{ secrets.TURSO_URL }}"            | bunx wrangler secret put TURSO_URL
+          echo "${{ secrets.TURSO_TOKEN }}"          | bunx wrangler secret put TURSO_TOKEN
+          echo "${{ secrets.ANALYTICS_SITE_KEY }}"  | bunx wrangler secret put SITE_KEYS
 
       - name: Deploy query-api worker
         run: bunx wrangler deploy
         working-directory: packages/query-api
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set query-api secrets
         working-directory: packages/query-api
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          echo "${{ secrets.TURSO_URL }}"              | bunx wrangler secret put TURSO_URL
-          echo "${{ secrets.TURSO_TOKEN }}"            | bunx wrangler secret put TURSO_TOKEN
-          echo "${{ secrets.ANALYTICS_QUERY_API_KEY }}" | bunx wrangler secret put QUERY_API_KEY
+          echo "${{ secrets.TURSO_URL }}"                  | bunx wrangler secret put TURSO_URL
+          echo "${{ secrets.TURSO_TOKEN }}"                | bunx wrangler secret put TURSO_TOKEN
+          echo "${{ secrets.ANALYTICS_QUERY_API_KEY }}"   | bunx wrangler secret put QUERY_API_KEY
 
       - name: Smoke test collector
         run: |
@@ -96,7 +121,6 @@ jobs:
         run: npm install
 
       - name: Deploy to Vercel (production)
-        # Run from repo root — Vercel uses rootDirectory=packages/dashboard from project settings
         run: npx vercel --prod --yes --token ${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
