@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # CLOUDFLARE_API_TOKEN must be a permanent Cloudflare API Token (not OAuth).
+      # Create one at: dash.cloudflare.com → My Profile → API Tokens → "Edit Cloudflare Workers" template
+      # Then: gh secret set CLOUDFLARE_API_TOKEN --body "<token>" --repo Njikam-nganzie-moustapha/analytics-kit
       - name: Deploy collector worker
         run: bunx wrangler deploy
         working-directory: packages/collector
