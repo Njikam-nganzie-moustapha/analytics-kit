@@ -1,5 +1,6 @@
 import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup } from './types'
 import type { VitalBucket } from './vitals'
+import type { PagePerfStat } from './perf'
 
 type TursoArg = { type: 'text' | 'integer' | 'real' | 'null'; value: string | null }
 type TursoReq = { type: 'execute'; stmt: { sql: string; args?: TursoArg[] } } | { type: 'close' }
@@ -176,6 +177,35 @@ export class ProcessorTurso {
         sql: `INSERT INTO error_daily_stats (site, fingerprint, date, count) VALUES (?, ?, ?, ?)
               ON CONFLICT (site, fingerprint, date) DO UPDATE SET count = count + excluded.count`,
         args: [str(g.site), str(fp), str(today), int(g.count)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Page performance ─────────────────────────────────────────────────────────
+
+  async upsertPagePerf(stats: PagePerfStat[]): Promise<void> {
+    if (stats.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = stats.map(s => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO page_perf (site, url, count, sum_ms, min_ms, max_ms, p50, p75, p95, updated)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (site, url) DO UPDATE SET
+                count   = count + excluded.count,
+                sum_ms  = sum_ms + excluded.sum_ms,
+                min_ms  = MIN(min_ms, excluded.min_ms),
+                max_ms  = MAX(max_ms, excluded.max_ms),
+                p50     = (p50 * 0.3 + excluded.p50 * 0.7),
+                p75     = (p75 * 0.3 + excluded.p75 * 0.7),
+                p95     = (p95 * 0.3 + excluded.p95 * 0.7),
+                updated = excluded.updated`,
+        args: [
+          str(s.site), str(s.url),
+          int(s.count), real(s.sumMs), real(s.minMs), real(s.maxMs),
+          real(s.p50), real(s.p75), real(s.p95),
+          int(Date.now()),
+        ],
       },
     }))
     await this._batchedUpsert(stmts)
@@ -388,6 +418,24 @@ export class ProcessorTurso {
         date        TEXT NOT NULL,
         count       INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (site, fingerprint, date)
+      )` }},
+      { type: 'close' },
+    ])
+
+    // page_perf — transaction performance aggregates
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS page_perf (
+        site    TEXT NOT NULL,
+        url     TEXT NOT NULL,
+        count   INTEGER NOT NULL DEFAULT 0,
+        sum_ms  REAL NOT NULL DEFAULT 0,
+        min_ms  REAL NOT NULL DEFAULT 0,
+        max_ms  REAL NOT NULL DEFAULT 0,
+        p50     REAL NOT NULL DEFAULT 0,
+        p75     REAL NOT NULL DEFAULT 0,
+        p95     REAL NOT NULL DEFAULT 0,
+        updated INTEGER NOT NULL,
+        PRIMARY KEY (site, url)
       )` }},
       { type: 'close' },
     ])

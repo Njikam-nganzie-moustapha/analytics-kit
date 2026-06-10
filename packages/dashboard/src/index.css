@@ -1137,6 +1137,37 @@ tbody tr:hover td { background: var(--surface-2); }
   transition: width .3s;
 }
 
+/* ── Performance tab ──────────────────────────────────────────────────────────── */
+.perf-url {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--text);
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perf-bar-bg {
+  width: 90px;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.perf-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.perf-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  min-width: 28px;
+}
+
 /* ── Env selector ─────────────────────────────────────────────────────────────── */
 .input-env {
   width: 120px;

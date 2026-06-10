@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -105,6 +105,15 @@ export async function fetchReleases(site: string): Promise<ReleaseRow[]> {
   if (!res.ok) return []
   const data = await res.json() as { releases: ReleaseRow[] }
   return data.releases ?? []
+}
+
+export async function fetchPerformance(site: string, url?: string): Promise<PerfRow[]> {
+  const q = new URLSearchParams({ site })
+  if (url) q.set('url', url)
+  const res  = await apiFetch(`${BASE}/performance?${q}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { rows: PerfRow[] }
+  return data.rows ?? []
 }
 
 export async function fetchErrorEvents(fingerprint: string, site: string): Promise<ErrorOccurrence[]> {

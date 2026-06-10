@@ -143,6 +143,14 @@ function makeApp(env: Env) {
     return c.json({ ok: true })
   })
 
+  // ── Performance ───────────────────────────────────────────────────────────
+  app.get('/performance', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getPagePerf(p.site, c.req.query('url'))
+    return c.json({ rows, meta: { site: p.site, total: rows.length } })
+  })
+
   // ── Releases ──────────────────────────────────────────────────────────────
   app.get('/releases', async c => {
     const p = parseSite(c.req.query('site'))

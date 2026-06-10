@@ -8,7 +8,8 @@ import { CronMonitors    } from './components/CronMonitors'
 import { SourceMapsTab   } from './components/SourceMapsTab'
 import { VitalsPanel     } from './components/VitalsPanel'
 import { OverviewPanel   } from './components/OverviewPanel'
-import { ReleasesTab     } from './components/ReleasesTab'
+import { ReleasesTab       } from './components/ReleasesTab'
+import { PerformancePanel  } from './components/PerformancePanel'
 import { ReplayModal     } from './components/ReplayModal'
 import { LoginScreen     } from './components/LoginScreen'
 import {
@@ -18,18 +19,19 @@ import {
 } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
 
-type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'vitals' | 'cron' | 'sourcemaps'
+type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'overview',    label: 'Overview',     icon: '⬡' },
-  { id: 'heatmap',     label: 'Heatmap',      icon: '◈' },
-  { id: 'zones',       label: 'Zones',        icon: '⊡' },
-  { id: 'sessions',    label: 'Sessions',     icon: '◉' },
-  { id: 'errors',      label: 'Errors',       icon: '⊘' },
-  { id: 'releases',    label: 'Releases',     icon: '⊛' },
-  { id: 'vitals',      label: 'Vitals',       icon: '♡' },
-  { id: 'cron',        label: 'Cron',         icon: '⏱' },
-  { id: 'sourcemaps',  label: 'Source Maps',  icon: '⊞' },
+  { id: 'overview',     label: 'Overview',     icon: '⬡' },
+  { id: 'heatmap',      label: 'Heatmap',      icon: '◈' },
+  { id: 'zones',        label: 'Zones',        icon: '⊡' },
+  { id: 'sessions',     label: 'Sessions',     icon: '◉' },
+  { id: 'errors',       label: 'Errors',       icon: '⊘' },
+  { id: 'releases',     label: 'Releases',     icon: '⊛' },
+  { id: 'performance',  label: 'Performance',  icon: '◎' },
+  { id: 'vitals',       label: 'Vitals',       icon: '♡' },
+  { id: 'cron',         label: 'Cron',         icon: '⏱' },
+  { id: 'sourcemaps',   label: 'Source Maps',  icon: '⊞' },
 ]
 
 const contentVariants = {
@@ -170,8 +172,9 @@ export function App() {
         onDelete={id => setMonitors(prev => prev.filter(m => m.monitorId !== id))}
       />
     )
-    if (tab === 'releases')   return <ReleasesTab site={query.site} />
-    if (tab === 'sourcemaps') return <SourceMapsTab site={query.site} />
+    if (tab === 'releases')    return <ReleasesTab site={query.site} />
+    if (tab === 'performance') return <PerformancePanel site={query.site} url={query.url || undefined} />
+    if (tab === 'sourcemaps')  return <SourceMapsTab site={query.site} />
   }
 
   if (!authChecked) return null

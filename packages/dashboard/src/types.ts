@@ -94,3 +94,15 @@ export interface ReleaseRow {
   events: number
   lastSeen: number
 }
+
+export interface PerfRow {
+  site:  string
+  url:   string
+  count: number
+  avg:   number
+  min:   number
+  max:   number
+  p50:   number
+  p75:   number
+  p95:   number
+}

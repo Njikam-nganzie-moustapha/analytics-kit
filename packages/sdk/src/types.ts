@@ -15,6 +15,7 @@ export type EventType =
   | 'rrweb_chunk'
   | 'identify'
   | 'custom'
+  | 'transaction'
 
 export interface AnalyticsEvent {
   t: number        // timestamp ms depuis epoch
@@ -59,6 +60,7 @@ export interface TrackerConfig {
   sampleRate?: number       // 0-1, default: 1 (100% sessions)
   debug?: boolean
   blockClass?: string       // CSS class pour masquer elements du replay
+  tracing?: boolean         // default: true — auto page load + SPA navigation transactions
 }
 
 export type PushFn = (partial: Omit<AnalyticsEvent, 't' | 'sid' | 'site' | 'uid'>) => void

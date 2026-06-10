@@ -132,6 +132,18 @@ export interface ReleaseRow {
   lastSeen: number
 }
 
+export interface PagePerfRow {
+  site:  string
+  url:   string
+  count: number
+  avg:   number
+  min:   number
+  max:   number
+  p50:   number
+  p75:   number
+  p95:   number
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -352,6 +364,32 @@ export class QueryTurso {
     }))
   }
 
+  async getPagePerf(site: string, url?: string): Promise<PagePerfRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (url !== undefined) { conds.push('url = ?'); args.push(str(url)) }
+
+    const rows = await this._query(
+      `SELECT site, url, count, sum_ms, min_ms, max_ms, p50, p75, p95
+       FROM page_perf
+       WHERE ${conds.join(' AND ')}
+       ORDER BY p75 DESC
+       LIMIT 200`,
+      args,
+    )
+    return rows.map(r => ({
+      site:  r.site!,
+      url:   r.url!,
+      count: parseInt(r.count ?? '0'),
+      avg:   Math.round(parseFloat(r.sum_ms ?? '0') / (parseInt(r.count ?? '1') || 1)),
+      min:   Math.round(parseFloat(r.min_ms ?? '0')),
+      max:   Math.round(parseFloat(r.max_ms ?? '0')),
+      p50:   Math.round(parseFloat(r.p50 ?? '0')),
+      p75:   Math.round(parseFloat(r.p75 ?? '0')),
+      p95:   Math.round(parseFloat(r.p95 ?? '0')),
+    }))
+  }
+
   async getReleases(site: string): Promise<ReleaseRow[]> {
     const rows = await this._query(
       `SELECT release, site, COUNT(*) as groups, SUM(count) as events, MAX(last_seen) as last_seen
@@ -564,6 +602,24 @@ export class QueryTurso {
       { type: 'close' },
     ]
     await this._pipeline(extra)
+
+    // page_perf — transaction performance aggregates
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS page_perf (
+          site    TEXT NOT NULL,
+          url     TEXT NOT NULL,
+          count   INTEGER NOT NULL DEFAULT 0,
+          sum_ms  REAL NOT NULL DEFAULT 0,
+          min_ms  REAL NOT NULL DEFAULT 0,
+          max_ms  REAL NOT NULL DEFAULT 0,
+          p50     REAL NOT NULL DEFAULT 0,
+          p75     REAL NOT NULL DEFAULT 0,
+          p95     REAL NOT NULL DEFAULT 0,
+          updated INTEGER NOT NULL,
+          PRIMARY KEY (site, url)
+        )` }},
+      { type: 'close' },
+    ])
 
     // error_daily_stats table
     await this._pipeline([

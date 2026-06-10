@@ -4,6 +4,7 @@ import { buildZoneStats } from './zones'
 import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
 import { buildVitalsBuckets } from './vitals'
+import { buildPagePerf } from './perf'
 import { createConsumer, symbolicateStack, type SourceMapConsumer } from './symbolicate'
 import { checkAlerts } from './alerts'
 
@@ -34,6 +35,7 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
     const sessionStats  = buildSessionStats(events)
     const errorGroups   = buildErrorGroups(events)
     const vitalsBuckets = buildVitalsBuckets(events)
+    const pagePerf      = buildPagePerf(events)
 
     await Promise.allSettled([
       db.upsertHeatmapCells(heatmapCells),
@@ -42,10 +44,11 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
       db.upsertErrorGroups(errorGroups),
       db.upsertVitalsBuckets(vitalsBuckets),
       db.upsertErrorDailyStats(errorGroups),
+      db.upsertPagePerf(pagePerf),
     ]).then(results => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals']
+          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf']
           console.error(`[processor] ${site} ${names[i]} upsert failed:`, r.reason)
         }
       })

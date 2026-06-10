@@ -1,8 +1,8 @@
-import { init, identify, setUser, setRelease, track, destroy } from './tracker'
+import { init, identify, setUser, setRelease, track, startTransaction, destroy } from './tracker'
 import { addBreadcrumb } from './breadcrumbs'
 import type { TrackerConfig, ZoneDef, AnalyticsEvent, UserContext } from './types'
 
-const Tracker = { init, identify, setUser, setRelease, track, destroy, addBreadcrumb }
+const Tracker = { init, identify, setUser, setRelease, track, startTransaction, destroy, addBreadcrumb }
 
 // Expose as global for <script> tag (UMD)
 if (typeof window !== 'undefined') {
@@ -10,5 +10,5 @@ if (typeof window !== 'undefined') {
 }
 
 export default Tracker
-export { init, identify, setUser, setRelease, track, destroy, addBreadcrumb }
+export { init, identify, setUser, setRelease, track, startTransaction, destroy, addBreadcrumb }
 export type { TrackerConfig, ZoneDef, AnalyticsEvent, UserContext }
