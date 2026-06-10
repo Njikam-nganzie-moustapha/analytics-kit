@@ -50,9 +50,11 @@ const rowVariant = {
 }
 
 export function SessionList({ sessions, site, onReplay }: Props) {
-  const [sortKey,    setSortKey]    = useState<SortKey>('started')
-  const [dir,        setDir]        = useState<Dir>('desc')
-  const [replayOnly, setReplayOnly] = useState(false)
+  const [sortKey,     setSortKey]     = useState<SortKey>('started')
+  const [dir,         setDir]         = useState<Dir>('desc')
+  const [replayOnly,  setReplayOnly]  = useState(false)
+  const [errorOnly,   setErrorOnly]   = useState(false)
+  const [urlFilter,   setUrlFilter]   = useState('')
 
   // expanded session → its errors (undefined = never fetched, null = loading, [] = loaded)
   const [expanded,      setExpanded]      = useState<string | null>(null)
@@ -85,12 +87,19 @@ export function SessionList({ sessions, site, onReplay }: Props) {
     else { setSortKey(k); setDir('desc') }
   }
 
-  const visible = replayOnly ? sessions.filter(s => s.hasReplay) : sessions
+  const ulf = urlFilter.toLowerCase()
+  const visible = sessions.filter(s => {
+    if (replayOnly && !s.hasReplay) return false
+    if (errorOnly  && !s.hasError)  return false
+    if (ulf && !s.sid.toLowerCase().includes(ulf) && !(s.uid?.toLowerCase().includes(ulf))) return false
+    return true
+  })
   const sorted  = [...visible].sort((a, b) => {
     const sign = dir === 'desc' ? -1 : 1
     return (a[sortKey] - b[sortKey]) * sign
   })
 
+  const withError   = sessions.filter(s => s.hasError).length
   const withReplay  = sessions.filter(s => s.hasReplay).length
   const avgDuration = sessions.length
     ? Math.round(sessions.reduce((s, r) => s + r.duration, 0) / sessions.length)
@@ -116,9 +125,10 @@ export function SessionList({ sessions, site, onReplay }: Props) {
     <div>
       <div className="stats-bar">
         {[
-          { label: 'Sessions',     value: sessions.length,     fmt: undefined },
-          { label: 'With replay',  value: withReplay,          fmt: undefined },
-          { label: 'Avg duration', value: avgDuration, fmt: (n: number) => fmtDuration(n) },
+          { label: 'Sessions',     value: sessions.length, fmt: undefined },
+          { label: 'With replay',  value: withReplay,     fmt: undefined },
+          { label: 'With errors',  value: withError,      fmt: undefined },
+          { label: 'Avg duration', value: avgDuration,    fmt: (n: number) => fmtDuration(n) },
         ].map((s, i) => (
           <motion.div
             key={s.label}
@@ -135,16 +145,23 @@ export function SessionList({ sessions, site, onReplay }: Props) {
         ))}
       </div>
 
-      <div className="toolbar">
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={replayOnly}
-            onChange={e => setReplayOnly(e.target.checked)}
-          />
+          <input type="checkbox" checked={replayOnly} onChange={e => setReplayOnly(e.target.checked)} />
           Replay only
         </label>
-        <span className="count-label">
+        <label className="toggle-label">
+          <input type="checkbox" checked={errorOnly} onChange={e => setErrorOnly(e.target.checked)} />
+          Has errors
+        </label>
+        <input
+          className="input"
+          placeholder="Filter by SID / user…"
+          value={urlFilter}
+          onChange={e => setUrlFilter(e.target.value)}
+          style={{ width: 180, fontSize: 12, padding: '4px 10px' }}
+        />
+        <span className="count-label" style={{ marginLeft: 'auto' }}>
           {sorted.length.toLocaleString()} sessions
         </span>
       </div>
