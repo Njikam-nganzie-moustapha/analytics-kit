@@ -4,7 +4,7 @@
 
 # analytics-kit — État du Projet
 
-_Dernière session: 2026-06-11 (SESSION 31 — SCHEMA FIX + ALERT CHANNELS UI + LIA BACKEND REDEPLOY)_
+_Dernière session: 2026-06-11 (SESSION 32 — AUTH FIX + FULL STACK VERIFIED)_
 
 ---
 
@@ -273,6 +273,8 @@ ANALYTICS_QUERY_API_KEY=916C30911E871973EF0A9EBF2661B635CF0C74A8F6A6202CD664754A
 | 31 | Schema fix — missing tables | Added `sessions`/`heatmap_cells`/`zone_stats` to `ensureSchema()` (both processor + query-api). Were never created → silent INSERT failures |
 | 31 | Alert channels UI | `alert_channels` table; `GET`/`PUT`/`DELETE /alert-channels`; AlertsTab channels section with Telegram + Slack cards, active badges, masked inputs, Remove button |
 | 31 | LIA backend redeploy | `npm run build` + `docker compose up -d saas-backend` — analytics env vars confirmed inside container |
+| 32 | Auth fix — 401 on all routes | `echo` added trailing newline to QUERY_API_KEY wrangler secret. Fixed: `.trim()` on both sides of comparison + `printf '%s'` in deploy.yml. Re-set GitHub secret to clean value. |
+| 32 | Schema fix — missing aggregated tables | Sessions/heatmap/zones tables absent → silent INSERT failures. Added to `ensureSchema()`. Reset checkpoint → re-ran processor → 18 cells + 4 sessions confirmed. |
 
 ---
 
@@ -415,8 +417,9 @@ docker compose up -d analytics-collector analytics-query-api analytics-processor
 - [x] `d:\n8n\saas\backend\.env` — `ANALYTICS_QUERY_API_URL` + `ANALYTICS_QUERY_API_KEY` présents ✅
 - [x] LIA backend rebuildé + redéployé (`docker compose up -d saas-backend`) ✅
 - [x] Events arrivent dans Turso — 32 events confirmés ✅
-- [ ] Attendre 5 min → vérifier que les tables agrégées sont créées par le processor
-- [ ] Ouvrir `https://analytics-kit-collector.vercel.app` → saisir `lia-platform` → vérifier les données
+- [x] Processor a créé les tables + 18 heatmap cells + 4 sessions ✅
+- [x] Query-API retourne les données correctement (auth fixée) ✅
+- [x] Dashboard Vercel accessible + données réelles (clics sur `/superadmin`) ✅
 
 ### Features
 - [x] Alert notification channels UI ✅ (sessions 31)
