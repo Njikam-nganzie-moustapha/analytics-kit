@@ -4,7 +4,7 @@
 
 # analytics-kit — État du Projet
 
-_Dernière session: 2026-06-11 (SESSION 29 — OWASP HARDENING + TOKEN RENEWAL)_
+_Dernière session: 2026-06-11 (SESSION 30 — SPRINT 5–6: FEEDBACK WIDGET + ALERT RULES UI + SAVED VIEWS)_
 
 ---
 
@@ -260,6 +260,19 @@ ANALYTICS_QUERY_API_KEY=916C30911E871973EF0A9EBF2661B635CF0C74A8F6A6202CD664754A
 
 ---
 
+## FEATURES AJOUTÉES (sessions 29–30)
+
+| Session | Feature | Détail |
+|---------|---------|--------|
+| 29 | OWASP hardening | CORS strict, security headers, site param validation, rate limiting |
+| 29 | Cloudflare token renouvelé | Token permanent (`cfut_tSF…`) expire 2030-01-02 |
+| 30 | Sprint 4 — Performance Tracing | `page_perf` table, EMA percentile blending, `PerformancePanel` |
+| 30 | Sprint 5 — User Feedback Widget | `showReportDialog()` SDK, `user_feedback` table, `FeedbackList` tab (✦) |
+| 30 | Sprint 6 — Alert Rules UI | `alert_rules` table, processor lit les règles DB, `AlertsTab` (⚑) |
+| 30 | Sprint 6 — Saved Views | ⊕ bookmark header, chips localStorage (max 12, dedup), `applyView()` |
+
+---
+
 ## BUGS CORRIGÉS (historique sessions 27–28)
 
 | Session | Bug | Fix |
@@ -341,7 +354,10 @@ d:\analytics-kit\
 │               ├── HeatmapOverlay.tsx, ZoneStats.tsx, ZonesTable.tsx
 │               ├── SessionList.tsx, SessionsTable.tsx, ReplayModal.tsx
 │               ├── ErrorList.tsx, LoginScreen.tsx, AnimatedNumber.tsx
-│               └── CronMonitors.tsx
+│               ├── CronMonitors.tsx, ReleasesTab.tsx, SourceMapsTab.tsx
+│               ├── VitalsPanel.tsx, OverviewPanel.tsx, PerformancePanel.tsx
+│               ├── FeedbackList.tsx                 ← Sprint 5 (✦ tab)
+│               └── AlertsTab.tsx                    ← Sprint 6 (⚑ tab)
 ```
 
 ---
@@ -392,8 +408,12 @@ docker compose up -d analytics-collector analytics-query-api analytics-processor
 
 ## RESTE À FAIRE
 
+### Ops / intégration LIA
 - [ ] Mettre à jour `d:\n8n\saas\backend\.env` : ajouter `ANALYTICS_QUERY_API_URL` + `ANALYTICS_QUERY_API_KEY`
 - [ ] Rebuild + redeploy LIA backend pour activer le proxy analytics
 - [ ] Vérifier que les events arrivent dans Turso (envoyer event test + SELECT COUNT(*) FROM analytics_events)
 - [ ] Attendre 5 min → vérifier que les tables agrégées sont créées par le processor
 - [ ] Ouvrir `https://analytics-kit-collector.vercel.app` → saisir `lia-platform` → vérifier les données
+
+### Features (~1% Sentry parity restant)
+- [ ] Alert notification channels UI — configurer Telegram/Slack webhooks depuis le dashboard (actuellement env vars only sur le processor)
