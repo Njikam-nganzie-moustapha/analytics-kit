@@ -1,9 +1,11 @@
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule } from './types'
 
-const BASE      = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
-const TOKEN_KEY = 'analyticskit_token'
+const BASE       = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
+const PRESET_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? ''
+const TOKEN_KEY  = 'analyticskit_token'
 
-export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) ?? '' }
+// Use stored login token first, fall back to the pre-configured VITE_API_KEY
+export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) || PRESET_KEY }
 export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t) }
 export function clearToken()        { localStorage.removeItem(TOKEN_KEY) }
 
