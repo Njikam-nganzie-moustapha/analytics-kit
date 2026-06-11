@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { HeatmapOverlay  } from './components/HeatmapOverlay'
 import { ZoneStats       } from './components/ZoneStats'
@@ -84,7 +84,10 @@ export function App() {
   const [urlInput,  setUrlInput]  = useState('')
   const [tab,  setTab]  = useState<Tab>('overview')
   const [query, setQuery] = useState<{ site: string; url: string }>({ site: '', url: '' })
-  const [savedViews, setSavedViews] = useState<SavedView[]>(loadViews)
+  const [savedViews,     setSavedViews]     = useState<SavedView[]>(loadViews)
+  const [refreshEvery,   setRefreshEvery]   = useState(0)   // seconds; 0 = off
+  const [lastRefreshed,  setLastRefreshed]  = useState<Date | null>(null)
+  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [loading,  setLoading]  = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -111,9 +114,9 @@ export function App() {
   }
   function closeReplay() { setReplaySid(''); setReplayEvents([]) }
 
-  const load = useCallback(async (q: { site: string; url: string }, t: Tab) => {
+  const load = useCallback(async (q: { site: string; url: string }, t: Tab, silent = false) => {
     if (!q.site) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     setLoadError('')
     try {
       if (t === 'overview') {
@@ -131,18 +134,25 @@ export function App() {
       if (t === 'errors')   setErrors(await fetchErrors(q.site, { limit: 200 }))
       if (t === 'vitals')   setVitals(await fetchVitals(q.site, q.url || undefined))
       if (t === 'cron')        setMonitors(await fetchCronMonitors(q.site))
-      // sourcemaps tab fetches its own data internally (no global state needed)
+      setLastRefreshed(new Date())
     } catch (e: unknown) {
       if ((e as { status?: number }).status === 401) { setAuthenticated(false); return }
       setLoadError(String(e))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     if (query.site) load(query, tab)
   }, [tab, query, load])
+
+  useEffect(() => {
+    if (refreshRef.current) clearInterval(refreshRef.current)
+    if (!refreshEvery || !query.site) return
+    refreshRef.current = setInterval(() => load(query, tab, true), refreshEvery * 1000)
+    return () => { if (refreshRef.current) clearInterval(refreshRef.current) }
+  }, [refreshEvery, query, tab, load])
 
   function handleLoad() {
     const q = { site: siteInput.trim(), url: urlInput.trim() }
@@ -266,6 +276,22 @@ export function App() {
             >
               ⊕
             </button>
+          )}
+          <select
+            className="input input-refresh"
+            value={refreshEvery}
+            onChange={e => setRefreshEvery(Number(e.target.value))}
+            title="Auto-refresh interval"
+          >
+            <option value={0}>Auto-refresh off</option>
+            <option value={30}>Every 30s</option>
+            <option value={60}>Every 1m</option>
+            <option value={300}>Every 5m</option>
+          </select>
+          {lastRefreshed && (
+            <span className="refresh-ts" title={`Last refreshed: ${lastRefreshed.toLocaleTimeString()}`}>
+              ↻ {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
           )}
           {authRequired && (
             <button
