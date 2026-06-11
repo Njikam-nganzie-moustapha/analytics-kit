@@ -54,10 +54,21 @@ function errorSpikeBlocks(site: string, count: number, top: ErrorGroup[]): Slack
 
 // ── Send to all configured channels ──────────────────────────────────────────
 
-async function broadcast(subject: string, body: string, errorGroups?: Map<string, ErrorGroup>): Promise<void> {
-  const tgToken  = process.env.ALERT_TELEGRAM_TOKEN
-  const tgChatId = process.env.ALERT_TELEGRAM_CHAT_ID
-  const slackUrl = process.env.ALERT_SLACK_WEBHOOK_URL
+interface Channels {
+  telegramToken?:   string
+  telegramChatId?:  string
+  slackWebhookUrl?: string
+}
+
+async function broadcast(
+  subject: string,
+  body: string,
+  errorGroups?: Map<string, ErrorGroup>,
+  channels: Channels = {},
+): Promise<void> {
+  const tgToken  = channels.telegramToken   || process.env.ALERT_TELEGRAM_TOKEN
+  const tgChatId = channels.telegramChatId  || process.env.ALERT_TELEGRAM_CHAT_ID
+  const slackUrl = channels.slackWebhookUrl || process.env.ALERT_SLACK_WEBHOOK_URL
 
   const tasks: Promise<void>[] = []
 
@@ -88,8 +99,12 @@ export async function checkAlerts(
     hasHistory:  boolean
   },
 ): Promise<void> {
-  const hasTelegram = !!(process.env.ALERT_TELEGRAM_TOKEN && process.env.ALERT_TELEGRAM_CHAT_ID)
-  const hasSlack    = !!process.env.ALERT_SLACK_WEBHOOK_URL
+  const channels     = await db.getAlertChannels(site)
+  const tgToken      = channels.telegramToken   || process.env.ALERT_TELEGRAM_TOKEN
+  const tgChatId     = channels.telegramChatId  || process.env.ALERT_TELEGRAM_CHAT_ID
+  const slackUrl     = channels.slackWebhookUrl || process.env.ALERT_SLACK_WEBHOOK_URL
+  const hasTelegram  = !!(tgToken && tgChatId)
+  const hasSlack     = !!slackUrl
   if (!hasTelegram && !hasSlack) return
 
   const now   = Date.now()
@@ -117,6 +132,7 @@ export async function checkAlerts(
         `🚨 Error spike — ${site}`,
         `${newErrors} new errors in last batch\n\n${topText}`,
         opts.errorGroups,
+        channels,
       )
       await db.setAlertFired(site, 'error_spike', now)
       console.log(`[alerts] error_spike fired for ${site} (${newErrors} errors)`)
@@ -132,6 +148,8 @@ export async function checkAlerts(
       await broadcast(
         `⚠️ Traffic drop — ${site}`,
         `No events received for ${missedBatches} consecutive processor runs.`,
+        undefined,
+        channels,
       )
       await db.setAlertFired(site, 'traffic_drop', now)
       console.log(`[alerts] traffic_drop fired for ${site} (${missedBatches} empty runs)`)

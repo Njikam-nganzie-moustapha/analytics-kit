@@ -144,6 +144,14 @@ export interface PagePerfRow {
   p95:   number
 }
 
+export interface AlertChannelRow {
+  site:             string
+  telegramToken:    string | null
+  telegramChatId:   string | null
+  slackWebhookUrl:  string | null
+  updated:          number
+}
+
 export interface AlertRuleRow {
   site:       string
   ruleType:   string
@@ -594,6 +602,52 @@ export class QueryTurso {
     )
   }
 
+  async getAlertChannels(site: string): Promise<AlertChannelRow | null> {
+    const rows = await this._query(
+      `SELECT site, telegram_token, telegram_chat_id, slack_webhook_url, updated
+       FROM alert_channels WHERE site = ?`,
+      [str(site)],
+    )
+    if (rows.length === 0) return null
+    const r = rows[0]
+    return {
+      site:            r.site!,
+      telegramToken:   r.telegram_token    ?? null,
+      telegramChatId:  r.telegram_chat_id  ?? null,
+      slackWebhookUrl: r.slack_webhook_url ?? null,
+      updated:         parseInt(r.updated ?? '0'),
+    }
+  }
+
+  async upsertAlertChannels(
+    site: string,
+    channels: { telegramToken?: string | null; telegramChatId?: string | null; slackWebhookUrl?: string | null },
+  ): Promise<void> {
+    await this._execute(
+      `INSERT INTO alert_channels (site, telegram_token, telegram_chat_id, slack_webhook_url, updated)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (site) DO UPDATE SET
+         telegram_token    = COALESCE(excluded.telegram_token,    telegram_token),
+         telegram_chat_id  = COALESCE(excluded.telegram_chat_id,  telegram_chat_id),
+         slack_webhook_url = COALESCE(excluded.slack_webhook_url, slack_webhook_url),
+         updated           = excluded.updated`,
+      [
+        str(site),
+        channels.telegramToken    != null ? str(channels.telegramToken)    : { type: 'null', value: null },
+        channels.telegramChatId   != null ? str(channels.telegramChatId)   : { type: 'null', value: null },
+        channels.slackWebhookUrl  != null ? str(channels.slackWebhookUrl)  : { type: 'null', value: null },
+        int(Date.now()),
+      ],
+    )
+  }
+
+  async clearAlertChannelField(site: string, field: 'telegram' | 'slack'): Promise<void> {
+    const sql = field === 'telegram'
+      ? `UPDATE alert_channels SET telegram_token = NULL, telegram_chat_id = NULL, updated = ? WHERE site = ?`
+      : `UPDATE alert_channels SET slack_webhook_url = NULL, updated = ? WHERE site = ?`
+    await this._execute(sql, [int(Date.now()), str(site)])
+  }
+
   async getFeedback(
     site: string,
     opts: { from?: number; to?: number; limit?: number } = {},
@@ -765,6 +819,18 @@ export class QueryTurso {
           ts          INTEGER NOT NULL
         )` }},
       { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_error_activity_fp ON error_activity (site, fingerprint, ts DESC)` } },
+      { type: 'close' },
+    ])
+
+    // alert_channels — per-site Telegram/Slack notification config
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_channels (
+          site              TEXT NOT NULL PRIMARY KEY,
+          telegram_token    TEXT,
+          telegram_chat_id  TEXT,
+          slack_webhook_url TEXT,
+          updated           INTEGER NOT NULL DEFAULT 0
+        )` }},
       { type: 'close' },
     ])
 

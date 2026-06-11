@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import type { AlertRule } from '../types'
-import { fetchAlertRules, updateAlertRule } from '../api'
+import type { AlertRule, AlertChannels } from '../types'
+import { fetchAlertRules, updateAlertRule, fetchAlertChannels, updateAlertChannels, clearAlertChannel } from '../api'
 
 interface Props { site: string }
 
@@ -54,25 +54,51 @@ function defaultState(ruleType: string, rule?: AlertRule): RuleState {
   }
 }
 
+interface ChannelFormState {
+  telegramToken:   string
+  telegramChatId:  string
+  slackWebhookUrl: string
+  saving:  boolean
+  saved:   boolean
+  error:   string
+}
+
 export function AlertsTab({ site }: Props) {
   const [loading, setLoading] = useState(false)
   const [loadErr, setLoadErr] = useState('')
   const [states,  setStates]  = useState<Record<string, RuleState>>({})
 
+  const [chLoading, setChLoading] = useState(false)
+  const [channels,  setChannels]  = useState<AlertChannels | null>(null)
+  const [chForm,    setChForm]    = useState<ChannelFormState>({
+    telegramToken: '', telegramChatId: '', slackWebhookUrl: '',
+    saving: false, saved: false, error: '',
+  })
+
   useEffect(() => {
     if (!site) return
     setLoading(true)
     setLoadErr('')
-    fetchAlertRules(site)
-      .then(rules => {
-        const byType = Object.fromEntries(rules.map(r => [r.ruleType, r]))
-        setStates({
-          error_spike:  defaultState('error_spike',  byType['error_spike']),
-          traffic_drop: defaultState('traffic_drop', byType['traffic_drop']),
-        })
+    Promise.all([
+      fetchAlertRules(site),
+      fetchAlertChannels(site).catch(() => null),
+    ]).then(([rules, ch]) => {
+      const byType = Object.fromEntries(rules.map(r => [r.ruleType, r]))
+      setStates({
+        error_spike:  defaultState('error_spike',  byType['error_spike']),
+        traffic_drop: defaultState('traffic_drop', byType['traffic_drop']),
       })
-      .catch(e => setLoadErr(String(e)))
-      .finally(() => setLoading(false))
+      if (ch) {
+        setChannels(ch)
+        setChForm(prev => ({
+          ...prev,
+          telegramChatId:  ch.telegram.chatId  ?? '',
+          slackWebhookUrl: ch.slack.webhookUrl ?? '',
+        }))
+      }
+    })
+    .catch(e => setLoadErr(String(e)))
+    .finally(() => { setLoading(false); setChLoading(false) })
   }, [site])
 
   function update(ruleType: string, patch: Partial<RuleState>) {
@@ -96,7 +122,51 @@ export function AlertsTab({ site }: Props) {
     }
   }
 
-  if (loading) return <div className="empty"><span>Loading alert rules…</span></div>
+  async function saveChannels() {
+    setChForm(prev => ({ ...prev, saving: true, error: '', saved: false }))
+    try {
+      const update: Record<string, string | null> = {}
+      if (chForm.telegramToken)   update.telegram_token    = chForm.telegramToken.trim()
+      if (chForm.telegramChatId)  update.telegram_chat_id  = chForm.telegramChatId.trim()
+      if (chForm.slackWebhookUrl) update.slack_webhook_url = chForm.slackWebhookUrl.trim()
+      if (Object.keys(update).length === 0) {
+        setChForm(prev => ({ ...prev, saving: false, error: 'Enter at least one value to save.' }))
+        return
+      }
+      await updateAlertChannels(site, update)
+      const refreshed = await fetchAlertChannels(site).catch(() => null)
+      if (refreshed) {
+        setChannels(refreshed)
+        setChForm(prev => ({
+          ...prev,
+          telegramToken:   '',
+          telegramChatId:  refreshed.telegram.chatId  ?? '',
+          slackWebhookUrl: refreshed.slack.webhookUrl ?? '',
+        }))
+      }
+      setChForm(prev => ({ ...prev, saving: false, saved: true }))
+      setTimeout(() => setChForm(prev => ({ ...prev, saved: false })), 2500)
+    } catch (e) {
+      setChForm(prev => ({ ...prev, saving: false, error: String(e) }))
+    }
+  }
+
+  async function clearChannel(channel: 'telegram' | 'slack') {
+    try {
+      await clearAlertChannel(site, channel)
+      const refreshed = await fetchAlertChannels(site).catch(() => null)
+      if (refreshed) {
+        setChannels(refreshed)
+        setChForm(prev => ({
+          ...prev,
+          telegramChatId:  refreshed.telegram.chatId  ?? '',
+          slackWebhookUrl: refreshed.slack.webhookUrl ?? '',
+        }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (loading || chLoading) return <div className="empty"><span>Loading alert rules…</span></div>
   if (loadErr) return (
     <div className="empty">
       <span className="empty-title" style={{ color: 'var(--error)' }}>Failed to load</span>
@@ -104,15 +174,106 @@ export function AlertsTab({ site }: Props) {
     </div>
   )
 
+  const hasTelegram = channels?.telegram.configured
+  const hasSlack    = channels?.slack.configured
+
   return (
     <div>
-      <div className="alerts-notice">
-        <span className="alerts-notice-icon">ℹ</span>
-        Alerts are sent via <strong>Telegram</strong> or <strong>Slack</strong> configured in the
-        processor's environment variables (<code>ALERT_TELEGRAM_TOKEN</code>, <code>ALERT_SLACK_WEBHOOK_URL</code>).
-        Rules below override the processor's defaults for this site.
-      </div>
+      {/* ── Notification channels ───────────────────────────────────────────── */}
+      <motion.section
+        className="alert-channels-section"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+      >
+        <h3 className="alert-channels-title">Notification Channels</h3>
+        <p className="alert-channels-desc">
+          Configure where alerts are sent for <strong>{site}</strong>.
+          DB config overrides processor env vars.
+        </p>
 
+        <div className="alert-channels-grid">
+          {/* Telegram */}
+          <div className={`alert-channel-card ${hasTelegram ? 'alert-channel-card--active' : ''}`}>
+            <div className="alert-channel-header">
+              <span className="alert-channel-icon">✈</span>
+              <span className="alert-channel-name">Telegram</span>
+              {hasTelegram && <span className="alert-channel-badge">Active</span>}
+            </div>
+            <label className="alert-field">
+              <span className="alert-field-label">Bot token</span>
+              <span className="alert-field-hint">
+                {hasTelegram ? 'Token configured — enter a new one to replace' : 'e.g. 123456:ABCdef…'}
+              </span>
+              <input
+                type="password"
+                className="input"
+                placeholder={hasTelegram ? '••••••••' : 'Enter bot token'}
+                value={chForm.telegramToken}
+                onChange={e => setChForm(prev => ({ ...prev, telegramToken: e.target.value }))}
+                autoComplete="off"
+              />
+            </label>
+            <label className="alert-field">
+              <span className="alert-field-label">Chat ID</span>
+              <span className="alert-field-hint">Numeric ID of the chat or group</span>
+              <input
+                type="text"
+                className="input"
+                placeholder="-100123456789"
+                value={chForm.telegramChatId}
+                onChange={e => setChForm(prev => ({ ...prev, telegramChatId: e.target.value }))}
+              />
+            </label>
+            {hasTelegram && (
+              <button className="btn btn-ghost btn-sm alert-channel-clear" onClick={() => clearChannel('telegram')}>
+                Remove Telegram
+              </button>
+            )}
+          </div>
+
+          {/* Slack */}
+          <div className={`alert-channel-card ${hasSlack ? 'alert-channel-card--active' : ''}`}>
+            <div className="alert-channel-header">
+              <span className="alert-channel-icon">#</span>
+              <span className="alert-channel-name">Slack</span>
+              {hasSlack && <span className="alert-channel-badge">Active</span>}
+            </div>
+            <label className="alert-field">
+              <span className="alert-field-label">Webhook URL</span>
+              <span className="alert-field-hint">
+                {hasSlack ? 'Webhook configured — enter a new URL to replace' : 'https://hooks.slack.com/services/…'}
+              </span>
+              <input
+                type="password"
+                className="input"
+                placeholder={hasSlack ? '••••••••' : 'Enter Slack webhook URL'}
+                value={chForm.slackWebhookUrl}
+                onChange={e => setChForm(prev => ({ ...prev, slackWebhookUrl: e.target.value }))}
+                autoComplete="off"
+              />
+            </label>
+            {hasSlack && (
+              <button className="btn btn-ghost btn-sm alert-channel-clear" onClick={() => clearChannel('slack')}>
+                Remove Slack
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="alert-channel-footer">
+          {chForm.error && <span className="alert-rule-err">{chForm.error}</span>}
+          <button
+            className={`btn ${chForm.saved ? 'btn-success' : ''}`}
+            disabled={chForm.saving}
+            onClick={saveChannels}
+          >
+            {chForm.saving ? 'Saving…' : chForm.saved ? '✓ Saved' : 'Save channels'}
+          </button>
+        </div>
+      </motion.section>
+
+      {/* ── Alert rules ─────────────────────────────────────────────────────── */}
       <div className="alert-rules-grid">
         {(['error_spike', 'traffic_drop'] as const).map((ruleType, i) => {
           const meta = RULE_META[ruleType]

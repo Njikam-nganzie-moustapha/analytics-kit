@@ -125,6 +125,11 @@ export interface SavedView {
   tab:   string
 }
 
+export interface AlertChannels {
+  telegram: { configured: boolean; chatId: string | null }
+  slack:    { configured: boolean; webhookUrl: string | null }
+}
+
 export interface FeedbackItem {
   id:      number
   site:    string

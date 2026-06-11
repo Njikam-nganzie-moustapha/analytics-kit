@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels } from './types'
 
 const BASE       = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const PRESET_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? ''
@@ -137,6 +137,33 @@ export async function updateAlertRule(
       headers: hdrs({ 'content-type': 'application/json' }),
       body:    JSON.stringify(rule),
     },
+  )
+}
+
+export async function fetchAlertChannels(site: string): Promise<AlertChannels> {
+  const res  = await apiFetch(`${BASE}/alert-channels?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  const data = await res.json() as { channels: AlertChannels }
+  return data.channels
+}
+
+export async function updateAlertChannels(
+  site: string,
+  update: { telegram_token?: string | null; telegram_chat_id?: string | null; slack_webhook_url?: string | null },
+): Promise<void> {
+  await apiFetch(
+    `${BASE}/alert-channels?site=${encodeURIComponent(site)}`,
+    {
+      method:  'PUT',
+      headers: hdrs({ 'content-type': 'application/json' }),
+      body:    JSON.stringify(update),
+    },
+  )
+}
+
+export async function clearAlertChannel(site: string, channel: 'telegram' | 'slack'): Promise<void> {
+  await apiFetch(
+    `${BASE}/alert-channels/${channel}?site=${encodeURIComponent(site)}`,
+    { method: 'DELETE', headers: hdrs() },
   )
 }
 

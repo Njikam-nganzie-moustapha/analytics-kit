@@ -181,6 +181,54 @@ function makeApp(env: Env) {
     return c.json({ ok: true, site: p.site, ruleType, enabled, threshold, cooldownMs })
   })
 
+  // ── Alert channels ────────────────────────────────────────────────────────
+  app.get('/alert-channels', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const row = await db.getAlertChannels(p.site)
+    return c.json({
+      channels: {
+        telegram: {
+          configured: !!(row?.telegramToken && row?.telegramChatId),
+          chatId:     row?.telegramChatId ?? null,
+        },
+        slack: {
+          configured: !!row?.slackWebhookUrl,
+          webhookUrl: row?.slackWebhookUrl ?? null,
+        },
+      },
+      meta: { site: p.site },
+    })
+  })
+
+  app.put('/alert-channels', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{
+      telegram_token?:    string | null
+      telegram_chat_id?:  string | null
+      slack_webhook_url?: string | null
+    }>().catch(() => ({} as Record<string, unknown>))
+
+    const update: { telegramToken?: string | null; telegramChatId?: string | null; slackWebhookUrl?: string | null } = {}
+    if ('telegram_token'    in body) update.telegramToken    = body.telegram_token    ? String(body.telegram_token).slice(0, 200)    : null
+    if ('telegram_chat_id'  in body) update.telegramChatId   = body.telegram_chat_id  ? String(body.telegram_chat_id).slice(0, 100)  : null
+    if ('slack_webhook_url' in body) update.slackWebhookUrl  = body.slack_webhook_url ? String(body.slack_webhook_url).slice(0, 300) : null
+
+    if (Object.keys(update).length === 0) return c.json({ error: 'no fields to update' }, 400)
+    await db.upsertAlertChannels(p.site, update)
+    return c.json({ ok: true, site: p.site })
+  })
+
+  app.delete('/alert-channels/:channel', async c => {
+    const channel = c.req.param('channel') as 'telegram' | 'slack'
+    const p       = parseSite(c.req.query('site'))
+    if (!p)                                          return c.json({ error: 'site required' }, 400)
+    if (channel !== 'telegram' && channel !== 'slack') return c.json({ error: 'channel must be telegram or slack' }, 400)
+    await db.clearAlertChannelField(p.site, channel)
+    return c.json({ ok: true, site: p.site, channel })
+  })
+
   // ── Feedback ─────────────────────────────────────────────────────────────
   app.get('/feedback', async c => {
     const p = parseSite(c.req.query('site'))

@@ -382,6 +382,26 @@ export class ProcessorTurso {
     ])
   }
 
+  // ── Alert channels ───────────────────────────────────────────────────────────
+
+  async getAlertChannels(site: string): Promise<{ telegramToken?: string; telegramChatId?: string; slackWebhookUrl?: string }> {
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  'SELECT telegram_token, telegram_chat_id, slack_webhook_url FROM alert_channels WHERE site = ?',
+        args: [str(site)],
+      }},
+      { type: 'close' },
+    ])
+    const rows = this._rows(res[0])
+    if (rows.length === 0) return {}
+    const r = rows[0]
+    return {
+      telegramToken:   r.telegram_token   ?? undefined,
+      telegramChatId:  r.telegram_chat_id ?? undefined,
+      slackWebhookUrl: r.slack_webhook_url ?? undefined,
+    }
+  }
+
   // ── Schema ───────────────────────────────────────────────────────────────────
 
   async ensureSchema(): Promise<void> {
@@ -526,6 +546,18 @@ export class ProcessorTurso {
         ts      INTEGER NOT NULL
       )` }},
       { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_user_feedback_site ON user_feedback (site, ts DESC)` } },
+      { type: 'close' },
+    ])
+
+    // alert_channels — per-site Telegram/Slack config (overrides env vars)
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_channels (
+        site              TEXT NOT NULL PRIMARY KEY,
+        telegram_token    TEXT,
+        telegram_chat_id  TEXT,
+        slack_webhook_url TEXT,
+        updated           INTEGER NOT NULL DEFAULT 0
+      )` }},
       { type: 'close' },
     ])
 
