@@ -170,6 +170,11 @@ export interface FeedbackRow {
 export class QueryTurso {
   constructor(private readonly url: string, private readonly token: string) {}
 
+  async getAvailableSites(): Promise<string[]> {
+    const rows = await this._query('SELECT DISTINCT site FROM analytics_events ORDER BY site', [])
+    return rows.map(r => r.site).filter((s): s is string => s !== null)
+  }
+
   async getHeatmapCells(site: string, url?: string): Promise<HeatmapRow[]> {
     const conds = ['site = ?']
     const args: TursoArg[] = [str(site)]

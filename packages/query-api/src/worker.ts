@@ -36,6 +36,12 @@ function makeApp(env: Env) {
 
   app.get('/health', c => c.json({ ok: true }))
 
+  // ── Sites (public — no auth required) ────────────────────────────────────
+  app.get('/sites', async c => {
+    const sites = await db.getAvailableSites()
+    return c.json({ sites })
+  })
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   app.get('/auth', c => c.json({ required: !!(env.DASHBOARD_PASSWORD && env.QUERY_API_KEY) }))
   app.post('/auth', async c => {

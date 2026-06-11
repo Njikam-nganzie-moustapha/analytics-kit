@@ -10,6 +10,7 @@ import { errorsRouter   } from './routes/errors'
 import { cronRouter       } from './routes/cron'
 import { vitalsRouter     } from './routes/vitals'
 import { sourcemapsRouter } from './routes/sourcemaps'
+import { sitesRouter      } from './routes/sites'
 import type { QueryTurso } from './turso'
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -46,6 +47,7 @@ export function createApp(db: QueryTurso) {
 
   app.get('/health', c => c.json({ ok: true }))
   app.route('/auth', authRouter())
+  app.route('/sites', sitesRouter(db))
 
   app.use('*', requireAuth)
 

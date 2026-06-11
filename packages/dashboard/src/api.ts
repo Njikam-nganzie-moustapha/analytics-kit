@@ -1,6 +1,6 @@
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule } from './types'
 
-const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
+const BASE      = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const TOKEN_KEY = 'analyticskit_token'
 
 export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) ?? '' }
@@ -19,6 +19,15 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
     throw Object.assign(new Error('unauthorized'), { status: 401 })
   }
   return res
+}
+
+export async function fetchSites(): Promise<string[]> {
+  try {
+    const res  = await fetch(`${BASE}/sites`, { headers: hdrs() })
+    if (!res.ok) return []
+    const data = await res.json() as { sites: string[] }
+    return data.sites ?? []
+  } catch { return [] }
 }
 
 export async function authStatus(): Promise<{ required: boolean }> {

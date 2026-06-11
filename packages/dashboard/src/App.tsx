@@ -17,7 +17,7 @@ import { LoginScreen     } from './components/LoginScreen'
 import {
   fetchHeatmap, fetchZones, fetchSessions, fetchReplay,
   fetchErrors, fetchCronMonitors, fetchVitals,
-  authStatus, clearToken, getToken,
+  fetchSites, authStatus, clearToken, getToken,
 } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, SavedView } from './types'
 
@@ -57,25 +57,33 @@ export function App() {
   const [authChecked,   setAuthChecked]   = useState(false)
   const [authRequired,  setAuthRequired]  = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
+  const [availableSites, setAvailableSites] = useState<string[]>([])
 
   useEffect(() => {
     authStatus()
       .then(({ required }) => {
         setAuthRequired(required)
-        setAuthenticated(!required || getToken() !== '')
+        const isAuth = !required || getToken() !== ''
+        setAuthenticated(isAuth)
         setAuthChecked(true)
+        if (isAuth) {
+          fetchSites().then(sites => {
+            setAvailableSites(sites)
+            if (sites.length > 0) {
+              setSiteInput(sites[0])
+              const q = { site: sites[0], url: '' }
+              setQuery(q)
+            }
+          })
+        }
       })
       .catch(() => setAuthChecked(true))
   }, [])
 
-  const KNOWN_SITES = (import.meta.env.VITE_SITE_KEYS ?? '')
-    .split(',').map((s: string) => s.trim()).filter(Boolean)
-
-  const [siteInput, setSiteInput] = useState(KNOWN_SITES[0] ?? '')
+  const [siteInput, setSiteInput] = useState('')
   const [urlInput,  setUrlInput]  = useState('')
-  const [envInput,  setEnvInput]  = useState('production')
   const [tab,  setTab]  = useState<Tab>('overview')
-  const [query, setQuery] = useState({ site: '', url: '' })
+  const [query, setQuery] = useState<{ site: string; url: string }>({ site: '', url: '' })
   const [savedViews, setSavedViews] = useState<SavedView[]>(loadViews)
 
   const [loading,  setLoading]  = useState(false)
@@ -136,14 +144,8 @@ export function App() {
     if (query.site) load(query, tab)
   }, [tab, query, load])
 
-  function effectiveSite(): string {
-    const s = siteInput.trim()
-    const e = envInput.trim()
-    return e && e !== 'production' ? `${s}:${e}` : s
-  }
-
   function handleLoad() {
-    const q = { site: effectiveSite(), url: urlInput.trim() }
+    const q = { site: siteInput.trim(), url: urlInput.trim() }
     setQuery(q)
     load(q, tab)
   }
@@ -156,8 +158,8 @@ export function App() {
     const site = siteInput.trim()
     if (!site) return
     const id    = `${Date.now()}`
-    const label = `${site}${envInput !== 'production' ? `:${envInput}` : ''}${urlInput ? ` ${urlInput}` : ''} → ${tab}`
-    const view: SavedView = { id, label, site, env: envInput, url: urlInput, tab }
+    const label = `${site}${urlInput ? ` ${urlInput}` : ''} → ${tab}`
+    const view: SavedView = { id, label, site, env: 'production', url: urlInput, tab }
     const next = [view, ...savedViews.filter(v => v.label !== label)].slice(0, 12)
     setSavedViews(next)
     saveViews(next)
@@ -171,11 +173,9 @@ export function App() {
 
   function applyView(v: SavedView) {
     setSiteInput(v.site)
-    setEnvInput(v.env)
     setUrlInput(v.url)
     setTab(v.tab as Tab)
-    const s = v.env && v.env !== 'production' ? `${v.site}:${v.env}` : v.site
-    const q = { site: s, url: v.url }
+    const q = { site: v.site, url: v.url }
     setQuery(q)
     load(q, v.tab as Tab)
   }
@@ -237,17 +237,13 @@ export function App() {
             value={siteInput}
             onChange={e => setSiteInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleLoad()}
+            list="sites-datalist"
           />
-          <select
-            className="input input-env"
-            value={envInput}
-            onChange={e => setEnvInput(e.target.value)}
-            title="Environment"
-          >
-            <option value="production">production</option>
-            <option value="staging">staging</option>
-            <option value="development">development</option>
-          </select>
+          {availableSites.length > 0 && (
+            <datalist id="sites-datalist">
+              {availableSites.map(s => <option key={s} value={s} />)}
+            </datalist>
+          )}
           <input
             className="input input-url"
             placeholder="/url (optional)"
@@ -282,13 +278,18 @@ export function App() {
         </div>
       </header>
 
-      {KNOWN_SITES.length > 0 && (
+      {availableSites.length > 0 && (
         <div className="site-chips">
-          {KNOWN_SITES.map((s: string) => (
+          {availableSites.map((s: string) => (
             <button
               key={s}
               className={`site-chip ${siteInput === s ? 'active' : ''}`}
-              onClick={() => setSiteInput(s)}
+              onClick={() => {
+                setSiteInput(s)
+                const q = { site: s, url: urlInput.trim() }
+                setQuery(q)
+                load(q, tab)
+              }}
             >
               {s}
             </button>
