@@ -10,6 +10,7 @@ import { VitalsPanel     } from './components/VitalsPanel'
 import { OverviewPanel   } from './components/OverviewPanel'
 import { ReleasesTab       } from './components/ReleasesTab'
 import { PerformancePanel  } from './components/PerformancePanel'
+import { FeedbackList      } from './components/FeedbackList'
 import { ReplayModal     } from './components/ReplayModal'
 import { LoginScreen     } from './components/LoginScreen'
 import {
@@ -19,7 +20,7 @@ import {
 } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
 
-type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps'
+type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps' | 'feedback'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview',     label: 'Overview',     icon: '⬡' },
@@ -27,6 +28,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'zones',        label: 'Zones',        icon: '⊡' },
   { id: 'sessions',     label: 'Sessions',     icon: '◉' },
   { id: 'errors',       label: 'Errors',       icon: '⊘' },
+  { id: 'feedback',     label: 'Feedback',     icon: '✦' },
   { id: 'releases',     label: 'Releases',     icon: '⊛' },
   { id: 'performance',  label: 'Performance',  icon: '◎' },
   { id: 'vitals',       label: 'Vitals',       icon: '♡' },
@@ -174,6 +176,7 @@ export function App() {
     )
     if (tab === 'releases')    return <ReleasesTab site={query.site} />
     if (tab === 'performance') return <PerformancePanel site={query.site} url={query.url || undefined} />
+    if (tab === 'feedback')    return <FeedbackList site={query.site} />
     if (tab === 'sourcemaps')  return <SourceMapsTab site={query.site} />
   }
 

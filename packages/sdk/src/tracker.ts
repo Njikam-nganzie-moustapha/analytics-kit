@@ -140,6 +140,109 @@ export function startTransaction(name: string, op = 'custom'): {
   }
 }
 
+export interface ReportDialogOptions {
+  title?:        string
+  subtitle?:     string
+  labelName?:    string
+  labelEmail?:   string
+  labelMessage?: string
+  labelSubmit?:  string
+  onSubmit?: (data: { name: string; email: string; message: string }) => void
+  onClose?:  () => void
+}
+
+export function showReportDialog(opts: ReportDialogOptions = {}): { close(): void } {
+  const push     = makePush()
+  const title    = opts.title        ?? 'Report a Problem'
+  const subtitle = opts.subtitle     ?? "If you'd like to help, tell us what happened."
+  const lblName  = opts.labelName    ?? 'Name'
+  const lblEmail = opts.labelEmail   ?? 'Email'
+  const lblMsg   = opts.labelMessage ?? 'What happened?'
+  const lblSub   = opts.labelSubmit  ?? 'Submit Report'
+
+  const overlay  = document.createElement('div')
+  overlay.setAttribute('data-analyticskit-dialog', 'true')
+  Object.assign(overlay.style, {
+    position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+    background: 'rgba(0,0,0,0.65)', zIndex: '999999',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+  })
+
+  const card = document.createElement('div')
+  Object.assign(card.style, {
+    background: '#1a1f2c', color: '#dce4f0', borderRadius: '12px',
+    padding: '28px', width: '100%', maxWidth: '420px', margin: '0 16px',
+    boxShadow: '0 20px 60px rgba(0,0,0,.55)', border: '1px solid #252a3a',
+  })
+
+  const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c))
+  const inp = `width:100%;background:#0d1017;border:1px solid #252a3a;border-radius:6px;padding:8px 10px;color:#dce4f0;font-size:13px;outline:none;box-sizing:border-box`
+
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px">
+      <div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:3px">${esc(title)}</div>
+        <div style="font-size:12px;color:#8892a8">${esc(subtitle)}</div>
+      </div>
+      <button data-close style="background:none;border:none;color:#8892a8;cursor:pointer;font-size:22px;padding:0;line-height:1">×</button>
+    </div>
+    <form data-form>
+      <label style="display:block;margin-bottom:10px">
+        <span style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#8892a8;margin-bottom:4px">${esc(lblName)}</span>
+        <input name="name" type="text" placeholder="Your name (optional)" style="${inp}" />
+      </label>
+      <label style="display:block;margin-bottom:10px">
+        <span style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#8892a8;margin-bottom:4px">${esc(lblEmail)}</span>
+        <input name="email" type="email" placeholder="you@example.com (optional)" style="${inp}" />
+      </label>
+      <label style="display:block;margin-bottom:16px">
+        <span style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#8892a8;margin-bottom:4px">${esc(lblMsg)} <span style="color:#f87171">*</span></span>
+        <textarea name="message" rows="4" placeholder="Steps to reproduce or description…" style="${inp};resize:vertical;min-height:80px"></textarea>
+      </label>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" data-close style="background:none;border:1px solid #252a3a;border-radius:6px;padding:8px 16px;color:#8892a8;cursor:pointer;font-size:13px">Cancel</button>
+        <button type="submit" style="background:#6366f1;border:none;border-radius:6px;padding:8px 16px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">${esc(lblSub)}</button>
+      </div>
+    </form>
+    <div data-success style="display:none;text-align:center;padding:24px 0">
+      <div style="font-size:36px;margin-bottom:10px">✓</div>
+      <div style="font-weight:600;margin-bottom:4px">Thank you!</div>
+      <div style="font-size:13px;color:#8892a8">Your report has been submitted.</div>
+    </div>
+  `
+
+  overlay.appendChild(card)
+  document.body.appendChild(overlay)
+
+  function close() {
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay)
+    opts.onClose?.()
+  }
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  card.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close))
+
+  const form       = card.querySelector('[data-form]')       as HTMLFormElement
+  const successDiv = card.querySelector('[data-success]')    as HTMLElement
+  form?.addEventListener('submit', e => {
+    e.preventDefault()
+    const fd      = new FormData(form)
+    const name    = ((fd.get('name')    as string) ?? '').trim()
+    const email   = ((fd.get('email')   as string) ?? '').trim()
+    const message = ((fd.get('message') as string) ?? '').trim()
+    if (!message) return
+    push({ type: 'user_feedback', ...(name  ? { name }  : {}), ...(email ? { email } : {}), message })
+    opts.onSubmit?.({ name, email, message })
+    form.style.display       = 'none'
+    successDiv.style.display = 'block'
+    setTimeout(close, 2000)
+  })
+
+  ;(card.querySelector('input') as HTMLElement | null)?.focus()
+  return { close }
+}
+
 export function destroy(): void {
   stopMouseTracking()
   stopErrorTracking()

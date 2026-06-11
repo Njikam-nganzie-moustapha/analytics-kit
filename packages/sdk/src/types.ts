@@ -16,6 +16,7 @@ export type EventType =
   | 'identify'
   | 'custom'
   | 'transaction'
+  | 'user_feedback'
 
 export interface AnalyticsEvent {
   t: number        // timestamp ms depuis epoch

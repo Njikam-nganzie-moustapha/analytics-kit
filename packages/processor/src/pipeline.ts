@@ -37,6 +37,19 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
     const vitalsBuckets = buildVitalsBuckets(events)
     const pagePerf      = buildPagePerf(events)
 
+    const feedback = events
+      .filter(e => e.type === 'user_feedback' && typeof e.message === 'string' && e.message.trim())
+      .map(e => ({
+        site:    e.site,
+        sid:     e.sid,
+        uid:     typeof e.uid     === 'string' ? e.uid     : undefined,
+        name:    typeof e.name    === 'string' ? e.name    : undefined,
+        email:   typeof e.email   === 'string' ? e.email   : undefined,
+        message: (e.message as string).trim().slice(0, 2000),
+        url:     typeof e.url     === 'string' ? e.url     : undefined,
+        ts:      e.t,
+      }))
+
     await Promise.allSettled([
       db.upsertHeatmapCells(heatmapCells),
       db.upsertZoneStats(zoneStats),
@@ -45,10 +58,11 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
       db.upsertVitalsBuckets(vitalsBuckets),
       db.upsertErrorDailyStats(errorGroups),
       db.upsertPagePerf(pagePerf),
+      db.insertFeedback(feedback),
     ]).then(results => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf']
+          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf', 'feedback']
           console.error(`[processor] ${site} ${names[i]} upsert failed:`, r.reason)
         }
       })

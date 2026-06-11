@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -105,6 +105,20 @@ export async function fetchReleases(site: string): Promise<ReleaseRow[]> {
   if (!res.ok) return []
   const data = await res.json() as { releases: ReleaseRow[] }
   return data.releases ?? []
+}
+
+export async function fetchFeedback(
+  site: string,
+  opts: { from?: number; to?: number; limit?: number } = {},
+): Promise<FeedbackItem[]> {
+  const q = new URLSearchParams({ site })
+  if (opts.from)  q.set('from',  String(opts.from))
+  if (opts.to)    q.set('to',    String(opts.to))
+  if (opts.limit) q.set('limit', String(opts.limit))
+  const res  = await apiFetch(`${BASE}/feedback?${q}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { items: FeedbackItem[] }
+  return data.items ?? []
 }
 
 export async function fetchPerformance(site: string, url?: string): Promise<PerfRow[]> {

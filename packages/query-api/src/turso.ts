@@ -144,6 +144,18 @@ export interface PagePerfRow {
   p95:   number
 }
 
+export interface FeedbackRow {
+  id:      number
+  site:    string
+  sid:     string
+  uid:     string | null
+  name:    string | null
+  email:   string | null
+  message: string
+  url:     string | null
+  ts:      number
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -535,6 +547,37 @@ export class QueryTurso {
     })
   }
 
+  async getFeedback(
+    site: string,
+    opts: { from?: number; to?: number; limit?: number } = {},
+  ): Promise<FeedbackRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (opts.from !== undefined) { conds.push('ts >= ?'); args.push(int(opts.from)) }
+    if (opts.to   !== undefined) { conds.push('ts <= ?'); args.push(int(opts.to))   }
+    const limit = Math.min(opts.limit ?? 100, 500)
+    args.push(int(limit))
+    const rows = await this._query(
+      `SELECT id, site, sid, uid, name, email, message, url, ts
+       FROM user_feedback
+       WHERE ${conds.join(' AND ')}
+       ORDER BY ts DESC
+       LIMIT ?`,
+      args,
+    )
+    return rows.map(r => ({
+      id:      parseInt(r.id ?? '0'),
+      site:    r.site!,
+      sid:     r.sid!,
+      uid:     r.uid   ?? null,
+      name:    r.name  ?? null,
+      email:   r.email ?? null,
+      message: r.message!,
+      url:     r.url   ?? null,
+      ts:      parseInt(r.ts ?? '0'),
+    }))
+  }
+
   async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
     const sql = `SELECT payload
                  FROM analytics_events
@@ -630,6 +673,23 @@ export class QueryTurso {
           count       INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (site, fingerprint, date)
         )` }},
+      { type: 'close' },
+    ])
+
+    // user_feedback — raw feedback submissions
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS user_feedback (
+          id      INTEGER PRIMARY KEY AUTOINCREMENT,
+          site    TEXT NOT NULL,
+          sid     TEXT NOT NULL,
+          uid     TEXT,
+          name    TEXT,
+          email   TEXT,
+          message TEXT NOT NULL,
+          url     TEXT,
+          ts      INTEGER NOT NULL
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_user_feedback_site ON user_feedback (site, ts DESC)` } },
       { type: 'close' },
     ])
 

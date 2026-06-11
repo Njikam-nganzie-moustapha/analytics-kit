@@ -78,6 +78,17 @@ export interface ErrorGroup {
   lastSeen: number
 }
 
+export interface FeedbackItem {
+  site:    string
+  sid:     string
+  uid?:    string
+  name?:   string
+  email?:  string
+  message: string
+  url?:    string
+  ts:      number
+}
+
 export interface Checkpoint {
   site: string
   lastT: number

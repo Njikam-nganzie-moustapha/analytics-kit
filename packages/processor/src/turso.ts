@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup } from './types'
+import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup, FeedbackItem } from './types'
 import type { VitalBucket } from './vitals'
 import type { PagePerfStat } from './perf'
 
@@ -177,6 +177,29 @@ export class ProcessorTurso {
         sql: `INSERT INTO error_daily_stats (site, fingerprint, date, count) VALUES (?, ?, ?, ?)
               ON CONFLICT (site, fingerprint, date) DO UPDATE SET count = count + excluded.count`,
         args: [str(g.site), str(fp), str(today), int(g.count)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── User feedback ────────────────────────────────────────────────────────────
+
+  async insertFeedback(items: FeedbackItem[]): Promise<void> {
+    if (items.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = items.map(f => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO user_feedback (site, sid, uid, name, email, message, url, ts)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          str(f.site), str(f.sid),
+          f.uid   ? str(f.uid)   : { type: 'null', value: null },
+          f.name  ? str(f.name)  : { type: 'null', value: null },
+          f.email ? str(f.email) : { type: 'null', value: null },
+          str(f.message),
+          f.url   ? str(f.url)   : { type: 'null', value: null },
+          int(f.ts),
+        ],
       },
     }))
     await this._batchedUpsert(stmts)
@@ -451,6 +474,23 @@ export class ProcessorTurso {
         ts          INTEGER NOT NULL
       )` }},
       { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_error_activity_fp ON error_activity (site, fingerprint, ts DESC)` } },
+      { type: 'close' },
+    ])
+
+    // user_feedback — raw feedback submissions
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS user_feedback (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        site    TEXT NOT NULL,
+        sid     TEXT NOT NULL,
+        uid     TEXT,
+        name    TEXT,
+        email   TEXT,
+        message TEXT NOT NULL,
+        url     TEXT,
+        ts      INTEGER NOT NULL
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_user_feedback_site ON user_feedback (site, ts DESC)` } },
       { type: 'close' },
     ])
 

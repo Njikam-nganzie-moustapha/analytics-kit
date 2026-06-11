@@ -106,3 +106,15 @@ export interface PerfRow {
   p75:   number
   p95:   number
 }
+
+export interface FeedbackItem {
+  id:      number
+  site:    string
+  sid:     string
+  uid:     string | null
+  name:    string | null
+  email:   string | null
+  message: string
+  url:     string | null
+  ts:      number
+}

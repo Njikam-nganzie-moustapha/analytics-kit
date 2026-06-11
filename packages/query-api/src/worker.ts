@@ -151,6 +151,18 @@ function makeApp(env: Env) {
     return c.json({ rows, meta: { site: p.site, total: rows.length } })
   })
 
+  // ── Feedback ─────────────────────────────────────────────────────────────
+  app.get('/feedback', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const items = await db.getFeedback(p.site, {
+      from:  c.req.query('from')  ? parseInt(c.req.query('from')!)  : undefined,
+      to:    c.req.query('to')    ? parseInt(c.req.query('to')!)    : undefined,
+      limit: c.req.query('limit') ? parseInt(c.req.query('limit')!) : 100,
+    })
+    return c.json({ items, meta: { site: p.site, total: items.length } })
+  })
+
   // ── Releases ──────────────────────────────────────────────────────────────
   app.get('/releases', async c => {
     const p = parseSite(c.req.query('site'))
