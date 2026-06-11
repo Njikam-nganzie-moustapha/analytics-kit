@@ -70,13 +70,13 @@ jobs:
         run: bunx wrangler deploy
         working-directory: packages/collector
         env:
-          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set collector secrets
         working-directory: packages/collector
         env:
-          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "${{ secrets.TURSO_URL }}"            | bunx wrangler secret put TURSO_URL
@@ -87,13 +87,13 @@ jobs:
         run: bunx wrangler deploy
         working-directory: packages/query-api
         env:
-          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set query-api secrets
         working-directory: packages/query-api
         env:
-          CLOUDFLARE_OAUTH_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "${{ secrets.TURSO_URL }}"                  | bunx wrangler secret put TURSO_URL
