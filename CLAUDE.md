@@ -4,7 +4,7 @@
 
 # analytics-kit — État du Projet
 
-_Dernière session: 2026-06-10 (SESSION 28 — CI/CD PIPELINE + FULL DEPLOY)_
+_Dernière session: 2026-06-11 (SESSION 29 — OWASP HARDENING + TOKEN RENEWAL)_
 
 ---
 
@@ -227,12 +227,9 @@ Commande: `bun test packages/processor/src packages/collector/src packages/query
 | `ANALYTICS_SITE_KEY` | clé site collector prod |
 | `VITE_QUERY_API_URL` | `https://analytics-query-lia.njikammoustapha67.workers.dev` |
 
-### ⚠️ CLOUDFLARE_API_TOKEN — À RENOUVELER
-Le token actuel est un OAuth token wrangler qui expire le **2026-06-10 à 16:36 UTC**.
-Pour créer un token permanent :
-1. Aller sur `dash.cloudflare.com` → My Profile → API Tokens
-2. Créer un token avec le template **"Edit Cloudflare Workers"**
-3. Mettre à jour le secret GitHub : `gh secret set CLOUDFLARE_API_TOKEN --body "<nouveau-token>" --repo Njikam-nganzie-moustapha/analytics-kit`
+### CLOUDFLARE_API_TOKEN — Renouvelé le 2026-06-11
+Token permanent (`cfut_tSF…`) — expire le **2030-01-02**. Template "Edit Cloudflare Workers".
+Renouvellement si besoin : `dash.cloudflare.com` → My Profile → API Tokens → "Edit Cloudflare Workers" template → `gh secret set CLOUDFLARE_API_TOKEN`
 
 ---
 
@@ -395,7 +392,6 @@ docker compose up -d analytics-collector analytics-query-api analytics-processor
 
 ## RESTE À FAIRE
 
-- [ ] **URGENT** — Renouveler `CLOUDFLARE_API_TOKEN` GitHub secret (expire 2026-06-10 16:36 UTC). Créer token permanent sur dash.cloudflare.com → API Tokens
 - [ ] Mettre à jour `d:\n8n\saas\backend\.env` : ajouter `ANALYTICS_QUERY_API_URL` + `ANALYTICS_QUERY_API_KEY`
 - [ ] Rebuild + redeploy LIA backend pour activer le proxy analytics
 - [ ] Vérifier que les events arrivent dans Turso (envoyer event test + SELECT COUNT(*) FROM analytics_events)
