@@ -529,6 +529,42 @@ export class ProcessorTurso {
       { type: 'close' },
     ])
 
+    // heatmap_cells / zone_stats / sessions — created here so INSERTs never fail cold
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS heatmap_cells (
+        site    TEXT    NOT NULL,
+        url     TEXT    NOT NULL,
+        gx      INTEGER NOT NULL,
+        gy      INTEGER NOT NULL,
+        count   INTEGER NOT NULL DEFAULT 0,
+        updated INTEGER NOT NULL,
+        PRIMARY KEY (site, url, gx, gy)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS zone_stats (
+        site      TEXT    NOT NULL,
+        zone_id   TEXT    NOT NULL,
+        url       TEXT    NOT NULL,
+        enters    INTEGER NOT NULL DEFAULT 0,
+        clicks    INTEGER NOT NULL DEFAULT 0,
+        avg_dwell REAL    NOT NULL DEFAULT 0,
+        updated   INTEGER NOT NULL,
+        PRIMARY KEY (site, zone_id, url)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS sessions (
+        sid         TEXT    NOT NULL PRIMARY KEY,
+        site        TEXT    NOT NULL,
+        uid         TEXT,
+        started     INTEGER NOT NULL,
+        ended       INTEGER NOT NULL,
+        duration    INTEGER NOT NULL DEFAULT 0,
+        url_count   INTEGER NOT NULL DEFAULT 0,
+        event_count INTEGER NOT NULL DEFAULT 0,
+        has_replay  INTEGER NOT NULL DEFAULT 0,
+        has_error   INTEGER NOT NULL DEFAULT 0
+      )` }},
+      { type: 'close' },
+    ])
+
     // Column migrations — ignore errors for columns that already exist
     for (const col of ['release TEXT', 'breadcrumbs TEXT', 'user_sample TEXT']) {
       await this._pipeline([
