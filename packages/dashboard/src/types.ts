@@ -107,6 +107,24 @@ export interface PerfRow {
   p95:   number
 }
 
+export interface AlertRule {
+  site:       string
+  ruleType:   string
+  enabled:    boolean
+  threshold:  number
+  cooldownMs: number
+  updated:    number
+}
+
+export interface SavedView {
+  id:    string
+  label: string
+  site:  string
+  env:   string
+  url:   string
+  tab:   string
+}
+
 export interface FeedbackItem {
   id:      number
   site:    string

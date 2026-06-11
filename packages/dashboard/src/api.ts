@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule } from './types'
 
 const BASE      = (import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211'
 const TOKEN_KEY = 'analyticskit_token'
@@ -105,6 +105,28 @@ export async function fetchReleases(site: string): Promise<ReleaseRow[]> {
   if (!res.ok) return []
   const data = await res.json() as { releases: ReleaseRow[] }
   return data.releases ?? []
+}
+
+export async function fetchAlertRules(site: string): Promise<AlertRule[]> {
+  const res  = await apiFetch(`${BASE}/alert-rules?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  if (!res.ok) return []
+  const data = await res.json() as { rules: AlertRule[] }
+  return data.rules ?? []
+}
+
+export async function updateAlertRule(
+  site: string,
+  ruleType: string,
+  rule: { enabled: boolean; threshold: number; cooldown_ms: number },
+): Promise<void> {
+  await apiFetch(
+    `${BASE}/alert-rules/${encodeURIComponent(ruleType)}?site=${encodeURIComponent(site)}`,
+    {
+      method:  'PUT',
+      headers: hdrs({ 'content-type': 'application/json' }),
+      body:    JSON.stringify(rule),
+    },
+  )
 }
 
 export async function fetchFeedback(

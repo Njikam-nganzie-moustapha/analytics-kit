@@ -144,6 +144,15 @@ export interface PagePerfRow {
   p95:   number
 }
 
+export interface AlertRuleRow {
+  site:       string
+  ruleType:   string
+  enabled:    boolean
+  threshold:  number
+  cooldownMs: number
+  updated:    number
+}
+
 export interface FeedbackRow {
   id:      number
   site:    string
@@ -547,6 +556,39 @@ export class QueryTurso {
     })
   }
 
+  async getAlertRules(site: string): Promise<AlertRuleRow[]> {
+    const rows = await this._query(
+      `SELECT site, rule_type, enabled, threshold, cooldown_ms, updated
+       FROM alert_rules WHERE site = ? ORDER BY rule_type`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      site:       r.site!,
+      ruleType:   r.rule_type!,
+      enabled:    r.enabled === '1',
+      threshold:  parseInt(r.threshold   ?? '5'),
+      cooldownMs: parseInt(r.cooldown_ms ?? '3600000'),
+      updated:    parseInt(r.updated     ?? '0'),
+    }))
+  }
+
+  async upsertAlertRule(
+    site: string,
+    ruleType: string,
+    rule: { enabled: boolean; threshold: number; cooldownMs: number },
+  ): Promise<void> {
+    await this._execute(
+      `INSERT INTO alert_rules (site, rule_type, enabled, threshold, cooldown_ms, updated)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (site, rule_type) DO UPDATE SET
+         enabled     = excluded.enabled,
+         threshold   = excluded.threshold,
+         cooldown_ms = excluded.cooldown_ms,
+         updated     = excluded.updated`,
+      [str(site), str(ruleType), int(rule.enabled ? 1 : 0), int(rule.threshold), int(rule.cooldownMs), int(Date.now())],
+    )
+  }
+
   async getFeedback(
     site: string,
     opts: { from?: number; to?: number; limit?: number } = {},
@@ -672,6 +714,20 @@ export class QueryTurso {
           date        TEXT NOT NULL,
           count       INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (site, fingerprint, date)
+        )` }},
+      { type: 'close' },
+    ])
+
+    // alert_rules — per-site configurable thresholds
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_rules (
+          site        TEXT NOT NULL,
+          rule_type   TEXT NOT NULL,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          threshold   INTEGER NOT NULL DEFAULT 5,
+          cooldown_ms INTEGER NOT NULL DEFAULT 3600000,
+          updated     INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, rule_type)
         )` }},
       { type: 'close' },
     ])

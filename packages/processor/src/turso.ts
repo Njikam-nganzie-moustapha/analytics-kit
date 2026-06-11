@@ -305,6 +305,27 @@ export class ProcessorTurso {
     return regressed
   }
 
+  // ── Alert rules ──────────────────────────────────────────────────────────────
+
+  async getAlertRules(site: string): Promise<Map<string, { threshold: number; cooldownMs: number; enabled: boolean }>> {
+    const res = await this._pipeline([
+      { type: 'execute', stmt: {
+        sql:  'SELECT rule_type, threshold, cooldown_ms, enabled FROM alert_rules WHERE site = ?',
+        args: [str(site)],
+      }},
+      { type: 'close' },
+    ])
+    const map = new Map<string, { threshold: number; cooldownMs: number; enabled: boolean }>()
+    for (const r of this._rows(res[0])) {
+      map.set(r.rule_type!, {
+        threshold:  parseInt(r.threshold  ?? '5'),
+        cooldownMs: parseInt(r.cooldown_ms ?? '3600000'),
+        enabled:    r.enabled === '1',
+      })
+    }
+    return map
+  }
+
   // ── Alert state ──────────────────────────────────────────────────────────────
 
   async getAlertState(site: string, alertType: string): Promise<number> {
@@ -474,6 +495,20 @@ export class ProcessorTurso {
         ts          INTEGER NOT NULL
       )` }},
       { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_error_activity_fp ON error_activity (site, fingerprint, ts DESC)` } },
+      { type: 'close' },
+    ])
+
+    // alert_rules — per-site configurable thresholds
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS alert_rules (
+        site        TEXT NOT NULL,
+        rule_type   TEXT NOT NULL,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        threshold   INTEGER NOT NULL DEFAULT 5,
+        cooldown_ms INTEGER NOT NULL DEFAULT 3600000,
+        updated     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, rule_type)
+      )` }},
       { type: 'close' },
     ])
 

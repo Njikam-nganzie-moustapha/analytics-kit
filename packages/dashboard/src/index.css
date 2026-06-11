@@ -1305,6 +1305,178 @@ tbody tr:hover td { background: var(--surface-2); }
 }
 .feedback-link:hover { text-decoration: underline; }
 
+/* ── Saved views chips ────────────────────────────────────────────────────────── */
+.saved-views-chips { flex-wrap: wrap; }
+.saved-views-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  align-self: center;
+  padding-right: 4px;
+}
+.saved-view-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.saved-view-btn {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 8px 3px 10px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .12s;
+}
+.saved-view-btn:hover { color: var(--text); }
+.saved-view-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 7px 0 2px;
+  line-height: 1;
+  transition: color .12s;
+}
+.saved-view-remove:hover { color: var(--error); }
+
+/* ── Alert rules tab ──────────────────────────────────────────────────────────── */
+.alerts-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  line-height: 1.55;
+}
+.alerts-notice-icon {
+  font-style: normal;
+  color: var(--accent-2);
+  font-size: 14px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.alert-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.alert-rule-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: border-color .15s;
+}
+.alert-rule-card:hover { border-color: var(--border-2); }
+.alert-rule-card--disabled { opacity: .6; }
+
+.alert-rule-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.alert-rule-icon { font-size: 22px; flex-shrink: 0; margin-top: 1px; }
+.alert-rule-title-wrap { flex: 1; min-width: 0; }
+.alert-rule-title {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.alert-rule-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+/* Toggle switch */
+.alert-toggle { position: relative; cursor: pointer; flex-shrink: 0; }
+.alert-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.alert-toggle-track {
+  display: block;
+  width: 36px;
+  height: 20px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  transition: background .2s, border-color .2s;
+  position: relative;
+}
+.alert-toggle input:checked ~ .alert-toggle-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.alert-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform .2s;
+}
+.alert-toggle input:checked ~ .alert-toggle-track .alert-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.alert-rule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.alert-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.alert-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.alert-field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.alert-number-input { width: 120px; }
+
+.alert-rule-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.alert-rule-err { font-size: 12px; color: var(--error); flex: 1; }
+.btn-success { background: var(--success) !important; color: #fff !important; }
+
 /* ── Env selector ─────────────────────────────────────────────────────────────── */
 .input-env {
   width: 120px;

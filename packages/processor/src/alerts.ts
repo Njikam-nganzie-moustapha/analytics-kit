@@ -1,9 +1,9 @@
 import type { ProcessorTurso } from './turso'
 import type { ErrorGroup } from './types'
 
-const COOLDOWN_MS       = parseInt(process.env.ALERT_COOLDOWN_MS       ?? '3600000') // 1 h
-const ERROR_THRESHOLD   = parseInt(process.env.ALERT_ERROR_THRESHOLD   ?? '5')
-const TRAFFIC_DROP_SKIP = parseInt(process.env.ALERT_TRAFFIC_DROP_SKIP ?? '2')
+const DEFAULT_COOLDOWN_MS       = parseInt(process.env.ALERT_COOLDOWN_MS       ?? '3600000')
+const DEFAULT_ERROR_THRESHOLD   = parseInt(process.env.ALERT_ERROR_THRESHOLD   ?? '5')
+const DEFAULT_TRAFFIC_DROP_SKIP = parseInt(process.env.ALERT_TRAFFIC_DROP_SKIP ?? '2')
 
 // ── Telegram ──────────────────────────────────────────────────────────────────
 
@@ -92,13 +92,24 @@ export async function checkAlerts(
   const hasSlack    = !!process.env.ALERT_SLACK_WEBHOOK_URL
   if (!hasTelegram && !hasSlack) return
 
-  const now = Date.now()
+  const now   = Date.now()
+  const rules = await db.getAlertRules(site)
+
+  const errorRule   = rules.get('error_spike')
+  const trafficRule = rules.get('traffic_drop')
+
+  const errorThreshold  = errorRule?.threshold  ?? DEFAULT_ERROR_THRESHOLD
+  const errorCooldown   = errorRule?.cooldownMs ?? DEFAULT_COOLDOWN_MS
+  const errorEnabled    = errorRule?.enabled    ?? true
+  const trafficSkip     = trafficRule?.threshold  ?? DEFAULT_TRAFFIC_DROP_SKIP
+  const trafficCooldown = trafficRule?.cooldownMs ?? DEFAULT_COOLDOWN_MS
+  const trafficEnabled  = trafficRule?.enabled    ?? true
 
   // ── Error spike ─────────────────────────────────────────────────────────────
   const newErrors = [...opts.errorGroups.values()].reduce((s, g) => s + g.count, 0)
-  if (newErrors >= ERROR_THRESHOLD) {
+  if (errorEnabled && newErrors >= errorThreshold) {
     const lastFired = await db.getAlertState(site, 'error_spike')
-    if (now - lastFired >= COOLDOWN_MS) {
+    if (now - lastFired >= errorCooldown) {
       const topErrors = [...opts.errorGroups.values()].sort((a, b) => b.count - a.count)
       const topText   = topErrors.slice(0, 3).map(g => `  • ${g.count}× ${g.message.slice(0, 80)}`).join('\n')
 
@@ -117,7 +128,7 @@ export async function checkAlerts(
     const lastFired     = await db.getAlertState(site, 'traffic_drop')
     const missedBatches = await db.incrementMissedBatches(site)
 
-    if (missedBatches >= TRAFFIC_DROP_SKIP && now - lastFired >= COOLDOWN_MS) {
+    if (trafficEnabled && missedBatches >= trafficSkip && now - lastFired >= trafficCooldown) {
       await broadcast(
         `⚠️ Traffic drop — ${site}`,
         `No events received for ${missedBatches} consecutive processor runs.`,

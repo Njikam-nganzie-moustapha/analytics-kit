@@ -151,6 +151,30 @@ function makeApp(env: Env) {
     return c.json({ rows, meta: { site: p.site, total: rows.length } })
   })
 
+  // ── Alert rules ───────────────────────────────────────────────────────────
+  const VALID_RULE_TYPES = new Set(['error_spike', 'traffic_drop'])
+
+  app.get('/alert-rules', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rules = await db.getAlertRules(p.site)
+    return c.json({ rules, meta: { site: p.site } })
+  })
+
+  app.put('/alert-rules/:type', async c => {
+    const ruleType = c.req.param('type')
+    const p        = parseSite(c.req.query('site'))
+    if (!p)                                return c.json({ error: 'site required' }, 400)
+    if (!VALID_RULE_TYPES.has(ruleType))   return c.json({ error: `rule type must be one of: ${[...VALID_RULE_TYPES].join(', ')}` }, 400)
+    const body = await c.req.json<{ enabled?: boolean; threshold?: number; cooldown_ms?: number }>()
+      .catch(() => ({} as { enabled?: boolean; threshold?: number; cooldown_ms?: number }))
+    const threshold  = Math.max(1, Math.min(10_000, Math.round(body.threshold  ?? 5)))
+    const cooldownMs = Math.max(60_000, Math.min(86_400_000, Math.round(body.cooldown_ms ?? 3_600_000)))
+    const enabled    = body.enabled !== false
+    await db.upsertAlertRule(p.site, ruleType, { enabled, threshold, cooldownMs })
+    return c.json({ ok: true, site: p.site, ruleType, enabled, threshold, cooldownMs })
+  })
+
   // ── Feedback ─────────────────────────────────────────────────────────────
   app.get('/feedback', async c => {
     const p = parseSite(c.req.query('site'))

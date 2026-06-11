@@ -11,6 +11,7 @@ import { OverviewPanel   } from './components/OverviewPanel'
 import { ReleasesTab       } from './components/ReleasesTab'
 import { PerformancePanel  } from './components/PerformancePanel'
 import { FeedbackList      } from './components/FeedbackList'
+import { AlertsTab         } from './components/AlertsTab'
 import { ReplayModal     } from './components/ReplayModal'
 import { LoginScreen     } from './components/LoginScreen'
 import {
@@ -18,9 +19,9 @@ import {
   fetchErrors, fetchCronMonitors, fetchVitals,
   authStatus, clearToken, getToken,
 } from './api'
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, SavedView } from './types'
 
-type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps' | 'feedback'
+type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'feedback' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps' | 'alerts'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview',     label: 'Overview',     icon: '⬡' },
@@ -33,8 +34,18 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'performance',  label: 'Performance',  icon: '◎' },
   { id: 'vitals',       label: 'Vitals',       icon: '♡' },
   { id: 'cron',         label: 'Cron',         icon: '⏱' },
+  { id: 'alerts',       label: 'Alerts',       icon: '⚑' },
   { id: 'sourcemaps',   label: 'Source Maps',  icon: '⊞' },
 ]
+
+const VIEWS_KEY = 'analyticskit_views'
+
+function loadViews(): SavedView[] {
+  try { return JSON.parse(localStorage.getItem(VIEWS_KEY) ?? '[]') } catch { return [] }
+}
+function saveViews(v: SavedView[]): void {
+  localStorage.setItem(VIEWS_KEY, JSON.stringify(v.slice(0, 12)))
+}
 
 const contentVariants = {
   initial: { opacity: 0, y: 10 },
@@ -65,6 +76,7 @@ export function App() {
   const [envInput,  setEnvInput]  = useState('production')
   const [tab,  setTab]  = useState<Tab>('overview')
   const [query, setQuery] = useState({ site: '', url: '' })
+  const [savedViews, setSavedViews] = useState<SavedView[]>(loadViews)
 
   const [loading,  setLoading]  = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -140,6 +152,34 @@ export function App() {
     setErrors(prev => prev.map(e => e.fingerprint === fp ? { ...e, ...update } : e))
   }
 
+  function saveView() {
+    const site = siteInput.trim()
+    if (!site) return
+    const id    = `${Date.now()}`
+    const label = `${site}${envInput !== 'production' ? `:${envInput}` : ''}${urlInput ? ` ${urlInput}` : ''} → ${tab}`
+    const view: SavedView = { id, label, site, env: envInput, url: urlInput, tab }
+    const next = [view, ...savedViews.filter(v => v.label !== label)].slice(0, 12)
+    setSavedViews(next)
+    saveViews(next)
+  }
+
+  function removeView(id: string) {
+    const next = savedViews.filter(v => v.id !== id)
+    setSavedViews(next)
+    saveViews(next)
+  }
+
+  function applyView(v: SavedView) {
+    setSiteInput(v.site)
+    setEnvInput(v.env)
+    setUrlInput(v.url)
+    setTab(v.tab as Tab)
+    const s = v.env && v.env !== 'production' ? `${v.site}:${v.env}` : v.site
+    const q = { site: s, url: v.url }
+    setQuery(q)
+    load(q, v.tab as Tab)
+  }
+
   function renderContent() {
     if (loading) return (
       <div className="loading">
@@ -177,6 +217,7 @@ export function App() {
     if (tab === 'releases')    return <ReleasesTab site={query.site} />
     if (tab === 'performance') return <PerformancePanel site={query.site} url={query.url || undefined} />
     if (tab === 'feedback')    return <FeedbackList site={query.site} />
+    if (tab === 'alerts')      return <AlertsTab site={query.site} />
     if (tab === 'sourcemaps')  return <SourceMapsTab site={query.site} />
   }
 
@@ -221,6 +262,15 @@ export function App() {
           >
             Load
           </button>
+          {query.site && (
+            <button
+              className="btn btn-ghost"
+              title="Bookmark current view"
+              onClick={saveView}
+            >
+              ⊕
+            </button>
+          )}
           {authRequired && (
             <button
               className="btn btn-ghost"
@@ -242,6 +292,19 @@ export function App() {
             >
               {s}
             </button>
+          ))}
+        </div>
+      )}
+      {savedViews.length > 0 && (
+        <div className="site-chips saved-views-chips">
+          <span className="saved-views-label">Saved:</span>
+          {savedViews.map(v => (
+            <span key={v.id} className="saved-view-chip">
+              <button className="saved-view-btn" onClick={() => applyView(v)} title={v.label}>
+                {v.label}
+              </button>
+              <button className="saved-view-remove" onClick={() => removeView(v.id)} title="Remove">×</button>
+            </span>
           ))}
         </div>
       )}
