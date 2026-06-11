@@ -79,9 +79,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          echo "${{ secrets.TURSO_URL }}"            | bunx wrangler secret put TURSO_URL
-          echo "${{ secrets.TURSO_TOKEN }}"          | bunx wrangler secret put TURSO_TOKEN
-          echo "${{ secrets.ANALYTICS_SITE_KEY }}"  | bunx wrangler secret put SITE_KEYS
+          printf '%s' "${{ secrets.TURSO_URL }}"           | bunx wrangler secret put TURSO_URL
+          printf '%s' "${{ secrets.TURSO_TOKEN }}"         | bunx wrangler secret put TURSO_TOKEN
+          printf '%s' "${{ secrets.ANALYTICS_SITE_KEY }}"  | bunx wrangler secret put SITE_KEYS
 
       - name: Deploy query-api worker
         run: bunx wrangler deploy
@@ -96,9 +96,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.refresh-cf-token.outputs.oauth_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          echo "${{ secrets.TURSO_URL }}"                  | bunx wrangler secret put TURSO_URL
-          echo "${{ secrets.TURSO_TOKEN }}"                | bunx wrangler secret put TURSO_TOKEN
-          echo "${{ secrets.ANALYTICS_QUERY_API_KEY }}"   | bunx wrangler secret put QUERY_API_KEY
+          printf '%s' "${{ secrets.TURSO_URL }}"                 | bunx wrangler secret put TURSO_URL
+          printf '%s' "${{ secrets.TURSO_TOKEN }}"               | bunx wrangler secret put TURSO_TOKEN
+          printf '%s' "${{ secrets.ANALYTICS_QUERY_API_KEY }}"   | bunx wrangler secret put QUERY_API_KEY
 
       - name: Smoke test collector
         run: |

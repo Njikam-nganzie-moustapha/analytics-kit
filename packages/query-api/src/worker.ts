@@ -54,8 +54,9 @@ function makeApp(env: Env) {
   // API key guard for all data routes
   app.use('*', async (c, next) => {
     if (!env.QUERY_API_KEY) return next()
-    const provided = c.req.header('x-api-key') ?? c.req.query('api_key')
-    if (provided !== env.QUERY_API_KEY) return c.json({ error: 'unauthorized' }, 401)
+    const provided  = (c.req.header('x-api-key') ?? c.req.query('api_key') ?? '').trim()
+    const expected  = env.QUERY_API_KEY.trim()
+    if (provided !== expected) return c.json({ error: 'unauthorized' }, 401)
     return next()
   })
 
