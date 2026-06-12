@@ -1,7 +1,9 @@
 import { fetchGeo } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { Section } from '@/components/kit/Section'
+import { Insights } from '@/components/kit/Insights'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
+import { deriveGeoInsights } from '@/lib/insights'
 import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
 
 // alpha-2 → flag emoji via regional indicator symbols
@@ -31,6 +33,7 @@ export function GeoView({ site }: { site: string }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      <div className="lg:col-span-2"><Insights items={deriveGeoInsights(rows)} /></div>
       <Section title="Countries" desc="Sessions by country">
         <BarRows rows={countryRows} />
       </Section>

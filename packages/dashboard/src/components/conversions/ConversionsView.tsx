@@ -3,8 +3,10 @@ import type { ReactNode } from 'react'
 import { fetchConversions } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { Section } from '@/components/kit/Section'
+import { Insights } from '@/components/kit/Insights'
 import { StatCard } from '@/components/kit/StatCard'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
+import { deriveConversionInsights } from '@/lib/insights'
 import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
 
 const KIND_ICON: Record<string, ReactNode> = {
@@ -31,6 +33,7 @@ export function ConversionsView({ site, from }: { site: string; from?: number })
 
   return (
     <div className="space-y-6">
+      <Insights items={deriveConversionInsights(rows)} />
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {kinds.map(([kind, count]) => (
           <StatCard key={kind} label={kindLabel(kind)} value={count.toLocaleString()}

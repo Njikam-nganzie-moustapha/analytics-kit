@@ -5,6 +5,9 @@ import { StatCard } from '@/components/kit/StatCard'
 import { HealthGauge } from '@/components/kit/HealthGauge'
 import { AreaTrend } from '@/components/kit/AreaTrend'
 import { Section } from '@/components/kit/Section'
+import { Insights } from '@/components/kit/Insights'
+import { InfoTip, METRIC_HELP } from '@/components/kit/InfoTip'
+import { deriveOverviewInsights } from '@/lib/insights'
 import { Card } from '@/components/ui/card'
 import { LoadingState, ErrorState } from '@/components/shell/states'
 
@@ -26,19 +29,22 @@ export function OverviewView({ site, from }: { site: string; from?: number }) {
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <Card className="flex flex-col items-center justify-center p-6">
           <HealthGauge score={summary.health} />
-          <p className="mt-2 text-center text-[12px] text-muted-foreground">
+          <p className="mt-2 flex items-center gap-1 text-center text-[12px] text-muted-foreground">
             Blends Core Web Vitals, error rate &amp; load speed
+            <InfoTip help={METRIC_HELP.health} label="health score" />
           </p>
         </Card>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Sessions" value={summary.sessions.toLocaleString()} icon={<MousePointerClick className="size-4" />} />
-          <StatCard label="Visitors" value={summary.users.toLocaleString()} icon={<Users className="size-4" />} />
-          <StatCard label="Error rate" value={`${summary.errorRate}%`} deltaGood="down"
+          <StatCard label="Sessions" value={summary.sessions.toLocaleString()} help={METRIC_HELP.sessions} icon={<MousePointerClick className="size-4" />} />
+          <StatCard label="Visitors" value={summary.users.toLocaleString()} help={METRIC_HELP.visitors} icon={<Users className="size-4" />} />
+          <StatCard label="Error rate" value={`${summary.errorRate}%`} deltaGood="down" help={METRIC_HELP.errorRate}
             sub={`${summary.errorSessions.toLocaleString()} sessions with errors`} icon={<AlertTriangle className="size-4" />} />
-          <StatCard label="Conversions" value={summary.conversions.toLocaleString()} icon={<Target className="size-4" />}
+          <StatCard label="Conversions" value={summary.conversions.toLocaleString()} help={METRIC_HELP.conversions} icon={<Target className="size-4" />}
             sub={summary.sessions > 0 ? `${((summary.conversions / summary.sessions) * 100).toFixed(1)}% rate` : undefined} />
         </div>
       </div>
+
+      <Insights items={deriveOverviewInsights(summary)} />
 
       <Section title="Sessions trend" desc="Sessions and error sessions over the selected range">
         {trend.length > 1 ? (

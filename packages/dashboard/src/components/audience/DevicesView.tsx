@@ -2,8 +2,10 @@ import { Monitor, Smartphone, Tablet } from 'lucide-react'
 import { fetchDevices } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { Section } from '@/components/kit/Section'
+import { Insights } from '@/components/kit/Insights'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { StatCard } from '@/components/kit/StatCard'
+import { deriveDeviceInsights } from '@/lib/insights'
 import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
 
 export function DevicesView({ site }: { site: string }) {
@@ -29,6 +31,7 @@ export function DevicesView({ site }: { site: string }) {
 
   return (
     <div className="space-y-6">
+      <Insights items={deriveDeviceInsights(rows)} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Desktop" value={`${pct('desktop')}%`} icon={<Monitor className="size-4" />} sub={`${(byType.get('desktop') ?? 0).toLocaleString()} sessions`} />
         <StatCard label="Mobile" value={`${pct('mobile')}%`} icon={<Smartphone className="size-4" />} sub={`${(byType.get('mobile') ?? 0).toLocaleString()} sessions`} />
