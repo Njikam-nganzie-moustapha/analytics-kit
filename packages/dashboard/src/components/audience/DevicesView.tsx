@@ -6,14 +6,13 @@ import { Insights } from '@/components/kit/Insights'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { StatCard } from '@/components/kit/StatCard'
 import { deriveDeviceInsights } from '@/lib/insights'
-import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
+import { LoadingState, ErrorState } from '@/components/shell/states'
 
 export function DevicesView({ site }: { site: string }) {
   const { data, loading, error, reload } = useAsync(() => fetchDevices(site), [site])
   if (loading) return <LoadingState />
   if (error) return <ErrorState message={error} onRetry={reload} />
   const rows = data ?? []
-  if (rows.length === 0) return <EmptyState title="No device data yet" hint="Device, browser and OS are parsed from visitor sessions." />
 
   const sumBy = (sel: (r: typeof rows[number]) => string): BarRow[] => {
     const m = new Map<string, number>()
@@ -38,8 +37,8 @@ export function DevicesView({ site }: { site: string }) {
         <StatCard label="Tablet" value={`${pct('tablet')}%`} icon={<Tablet className="size-4" />} sub={`${(byType.get('tablet') ?? 0).toLocaleString()} sessions`} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Browsers" desc="Sessions by browser"><BarRows rows={browserRows} /></Section>
-        <Section title="Operating systems" desc="Sessions by OS"><BarRows rows={osRows} /></Section>
+        <Section title="Browsers" desc="Sessions by browser"><BarRows rows={browserRows} emptyLabel="No device data yet — parsed from visitor sessions." /></Section>
+        <Section title="Operating systems" desc="Sessions by OS"><BarRows rows={osRows} emptyLabel="No device data yet — parsed from visitor sessions." /></Section>
       </div>
     </div>
   )

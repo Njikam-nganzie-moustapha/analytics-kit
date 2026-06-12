@@ -4,8 +4,10 @@ import { Section } from '@/components/kit/Section'
 import { Insights } from '@/components/kit/Insights'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { deriveTrafficInsights } from '@/lib/insights'
-import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
+import { LoadingState, ErrorState } from '@/components/shell/states'
 import type { Channel, TrafficSource } from '@/types'
+
+const ALL_CHANNELS: Channel[] = ['direct', 'organic', 'social', 'referral', 'ai']
 
 const CHANNEL_COLOR: Record<Channel, string> = {
   direct: '#64748b', organic: '#22c55e', social: '#3b82f6', referral: '#a855f7', ai: '#d97706',
@@ -19,7 +21,6 @@ export function TrafficView({ site, from }: { site: string; from?: number }) {
   if (loading) return <LoadingState />
   if (error) return <ErrorState message={error} onRetry={reload} />
   const sources = data ?? []
-  if (sources.length === 0) return <EmptyState title="No traffic data yet" hint="Once visitors arrive, channels and campaigns appear here." />
 
   const byChannel = new Map<Channel, number>()
   const byReferrer = new Map<string, number>()
@@ -30,9 +31,11 @@ export function TrafficView({ site, from }: { site: string; from?: number }) {
     if (s.utmCampaign || s.utmSource) campaigns.push(s)
   }
 
-  const channelRows: BarRow[] = [...byChannel.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([c, v]) => ({ label: CHANNEL_LABEL[c], value: v, color: CHANNEL_COLOR[c] }))
+  // Always show all five channels (0 when empty) so the structure is visible.
+  const channelRows: BarRow[] = ALL_CHANNELS
+    .map(c => ({ c, v: byChannel.get(c) ?? 0 }))
+    .sort((a, b) => b.v - a.v)
+    .map(({ c, v }) => ({ label: CHANNEL_LABEL[c], value: v, color: CHANNEL_COLOR[c] }))
   const referrerRows: BarRow[] = [...byReferrer.entries()].sort((a, b) => b[1] - a[1]).map(([h, v]) => ({ label: h, value: v }))
 
   return (

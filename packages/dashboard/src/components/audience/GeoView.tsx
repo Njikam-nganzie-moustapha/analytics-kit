@@ -4,7 +4,7 @@ import { Section } from '@/components/kit/Section'
 import { Insights } from '@/components/kit/Insights'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { deriveGeoInsights } from '@/lib/insights'
-import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
+import { LoadingState, ErrorState } from '@/components/shell/states'
 
 // alpha-2 → flag emoji via regional indicator symbols
 function flag(cc: string): string {
@@ -22,7 +22,6 @@ export function GeoView({ site }: { site: string }) {
   if (loading) return <LoadingState />
   if (error) return <ErrorState message={error} onRetry={reload} />
   const rows = data ?? []
-  if (rows.length === 0) return <EmptyState title="No geography data yet" hint="Country and city come from the Cloudflare edge — visit from a deployed origin to populate it." />
 
   const byCountry = new Map<string, number>()
   for (const r of rows) byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + r.sessions)
@@ -35,7 +34,7 @@ export function GeoView({ site }: { site: string }) {
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="lg:col-span-2"><Insights items={deriveGeoInsights(rows)} /></div>
       <Section title="Countries" desc="Sessions by country">
-        <BarRows rows={countryRows} />
+        <BarRows rows={countryRows} emptyLabel="No geography data yet — country/city come from the Cloudflare edge on a deployed origin." />
       </Section>
       <Section title="Top cities" desc="Sessions by city">
         {cities.length === 0 ? (

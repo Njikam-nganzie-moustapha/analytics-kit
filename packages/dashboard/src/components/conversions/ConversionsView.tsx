@@ -7,7 +7,9 @@ import { Insights } from '@/components/kit/Insights'
 import { StatCard } from '@/components/kit/StatCard'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { deriveConversionInsights } from '@/lib/insights'
-import { LoadingState, ErrorState, EmptyState } from '@/components/shell/states'
+import { LoadingState, ErrorState } from '@/components/shell/states'
+
+const BASE_KINDS = ['phone', 'email', 'form'] as const
 
 const KIND_ICON: Record<string, ReactNode> = {
   phone: <Phone className="size-4" />, email: <Mail className="size-4" />, form: <FileText className="size-4" />,
@@ -19,8 +21,6 @@ export function ConversionsView({ site, from }: { site: string; from?: number })
   if (loading) return <LoadingState />
   if (error) return <ErrorState message={error} onRetry={reload} />
   const rows = data ?? []
-  if (rows.length === 0) return <EmptyState icon={<Target className="size-8" />} title="No conversions yet"
-    hint="Phone/email link clicks and custom conversion events appear here as visitors take action." />
 
   const byKind = new Map<string, number>()
   const byUrl = new Map<string, number>()
@@ -28,7 +28,11 @@ export function ConversionsView({ site, from }: { site: string; from?: number })
     byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + r.count)
     if (r.url) byUrl.set(r.url, (byUrl.get(r.url) ?? 0) + r.count)
   }
-  const kinds = [...byKind.entries()].sort((a, b) => b[1] - a[1])
+  // Always surface the standard conversion types (0 when none), then any extras.
+  const kinds: [string, number][] = [
+    ...BASE_KINDS.map(k => [k, byKind.get(k) ?? 0] as [string, number]),
+    ...[...byKind.entries()].filter(([k]) => !BASE_KINDS.includes(k as typeof BASE_KINDS[number])),
+  ].sort((a, b) => b[1] - a[1])
   const urlRows: BarRow[] = [...byUrl.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))
 
   return (
