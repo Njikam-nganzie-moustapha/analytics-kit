@@ -8,6 +8,7 @@ import { SavedViewsBar } from '@/components/shell/SavedViewsBar'
 import type { View } from '@/components/shell/nav'
 import { viewLabel } from '@/components/shell/nav'
 import { resolveRange, type RangeKey } from '@/timerange'
+import { useBranding } from '@/branding'
 import { LoginScreen } from './components/LoginScreen'
 
 const HeatmapOverlay   = lazy(() => import('./components/HeatmapOverlay').then(m => ({ default: m.HeatmapOverlay })))
@@ -23,6 +24,9 @@ const GeoView          = lazy(() => import('./components/audience/GeoView').then
 const DevicesView      = lazy(() => import('./components/audience/DevicesView').then(m => ({ default: m.DevicesView })))
 const ConversionsView  = lazy(() => import('./components/conversions/ConversionsView').then(m => ({ default: m.ConversionsView })))
 const FunnelsView      = lazy(() => import('./components/behavior/FunnelsView').then(m => ({ default: m.FunnelsView })))
+const SeoView          = lazy(() => import('./components/audit/SeoView').then(m => ({ default: m.SeoView })))
+const PageSpeedView    = lazy(() => import('./components/audit/PageSpeedView').then(m => ({ default: m.PageSpeedView })))
+const BrandingView     = lazy(() => import('./components/settings/BrandingView').then(m => ({ default: m.BrandingView })))
 const ReleasesTab      = lazy(() => import('./components/ReleasesTab').then(m => ({ default: m.ReleasesTab })))
 const PerformancePanel = lazy(() => import('./components/PerformancePanel').then(m => ({ default: m.PerformancePanel })))
 const FeedbackList     = lazy(() => import('./components/FeedbackList').then(m => ({ default: m.FeedbackList })))
@@ -119,7 +123,10 @@ export function App() {
 
   // Views that fetch their own data (self-contained, range-aware).
   const SELF_FETCH: ReadonlySet<View> = useMemo(
-    () => new Set<View>(['overview', 'traffic', 'geo', 'devices', 'conversions', 'funnels']), [])
+    () => new Set<View>(['overview', 'traffic', 'geo', 'devices', 'conversions', 'funnels', 'seo', 'pagespeed', 'branding']), [])
+
+  // White-label branding for the selected site (applies the primary colour).
+  const { branding, reload: reloadBranding } = useBranding(query.site)
 
   const load = useCallback(async (q: { site: string; url: string }, v: View, silent = false) => {
     if (!q.site || SELF_FETCH.has(v)) return
@@ -192,6 +199,9 @@ export function App() {
       case 'devices': return <DevicesView site={query.site} />
       case 'conversions': return <ConversionsView site={query.site} from={from} />
       case 'funnels': return <FunnelsView site={query.site} from={from} />
+      case 'seo': return <SeoView />
+      case 'pagespeed': return <PageSpeedView />
+      case 'branding': return <BrandingView site={query.site} onSaved={reloadBranding} />
       case 'behavior': return (
         <div className="space-y-6">
           <HeatmapOverlay cells={cells} />
@@ -225,12 +235,12 @@ export function App() {
     <div className="flex h-dvh flex-col">
       <div className="flex flex-1 overflow-hidden">
         <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
-          <SidebarNav active={view} onSelect={setView} />
+          <SidebarNav active={view} onSelect={setView} brandName={branding?.productName} brandLogo={branding?.logoUrl} />
         </aside>
 
         <Sheet open={mobileNav} onOpenChange={setMobileNav}>
           <SheetContent side="left" className="w-72 border-sidebar-border bg-sidebar p-0">
-            <SidebarNav active={view} onSelect={setView} onNavigate={() => setMobileNav(false)} />
+            <SidebarNav active={view} onSelect={setView} onNavigate={() => setMobileNav(false)} brandName={branding?.productName} brandLogo={branding?.logoUrl} />
           </SheetContent>
         </Sheet>
 

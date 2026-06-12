@@ -210,6 +210,14 @@ export interface FunnelStep { label: string; type: 'url' | 'event'; match: strin
 export interface FunnelDef { id: string; site: string; name: string; steps: FunnelStep[]; updated: number }
 export interface FunnelResult { counts: number[]; total: number }
 
+export interface BrandingRow {
+  site: string
+  productName: string | null
+  logoUrl: string | null
+  primary: string | null   // HSL triple e.g. "262 83% 58%"
+  updated: number
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -820,6 +828,37 @@ export class QueryTurso {
     }
   }
 
+  // ── Branding (white-label) ─────────────────────────────────────────────────────
+
+  async getBranding(site: string): Promise<BrandingRow | null> {
+    const rows = await this._query(
+      `SELECT site, product_name, logo_url, primary_hsl, updated FROM branding WHERE site = ?`,
+      [str(site)],
+    )
+    if (rows.length === 0) return null
+    const r = rows[0]
+    return {
+      site: r.site!,
+      productName: r.product_name ?? null,
+      logoUrl: r.logo_url ?? null,
+      primary: r.primary_hsl ?? null,
+      updated: parseInt(r.updated ?? '0'),
+    }
+  }
+
+  async upsertBranding(site: string, b: { productName?: string | null; logoUrl?: string | null; primary?: string | null }): Promise<void> {
+    const nz = (v: string | null | undefined): TursoArg => (v != null ? str(v) : { type: 'null', value: null })
+    await this._execute(
+      `INSERT INTO branding (site, product_name, logo_url, primary_hsl, updated) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (site) DO UPDATE SET
+         product_name = COALESCE(excluded.product_name, product_name),
+         logo_url     = COALESCE(excluded.logo_url, logo_url),
+         primary_hsl  = COALESCE(excluded.primary_hsl, primary_hsl),
+         updated      = excluded.updated`,
+      [str(site), nz(b.productName), nz(b.logoUrl), nz(b.primary), int(Date.now())],
+    )
+  }
+
   // ── Funnels ────────────────────────────────────────────────────────────────────
 
   async listFunnels(site: string): Promise<FunnelDef[]> {
@@ -1109,6 +1148,13 @@ export class QueryTurso {
           steps   TEXT NOT NULL,
           updated INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (site, id)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS branding (
+          site         TEXT NOT NULL PRIMARY KEY,
+          product_name TEXT,
+          logo_url     TEXT,
+          primary_hsl  TEXT,
+          updated      INTEGER NOT NULL DEFAULT 0
         )` }},
       { type: 'close' },
     ])

@@ -6,17 +6,23 @@ interface Props {
   active: View
   onSelect: (v: View) => void
   onNavigate?: () => void
+  brandName?: string | null
+  brandLogo?: string | null
 }
 
-export function SidebarNav({ active, onSelect, onNavigate }: Props) {
+export function SidebarNav({ active, onSelect, onNavigate, brandName, brandLogo }: Props) {
   return (
     <nav className="flex h-full flex-col gap-1 overflow-y-auto px-3 py-4" aria-label="Primary">
       <div className="mb-4 flex items-center gap-2 px-2">
-        <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-          <Activity className="size-4" />
-        </span>
-        <span className="text-[15px] font-bold tracking-tight">
-          analytics<span className="text-primary">kit</span>
+        {brandLogo ? (
+          <img src={brandLogo} alt="" className="size-8 rounded-lg object-cover" />
+        ) : (
+          <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <Activity className="size-4" />
+          </span>
+        )}
+        <span className="truncate text-[15px] font-bold tracking-tight">
+          {brandName ? brandName : <>analytics<span className="text-primary">kit</span></>}
         </span>
       </div>
 

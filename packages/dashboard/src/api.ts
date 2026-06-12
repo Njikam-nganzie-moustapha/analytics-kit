@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding } from './types'
 
 const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const TOKEN_KEY = 'analyticskit_token'
@@ -339,6 +339,38 @@ export async function computeFunnel(site: string, steps: FunnelStep[], from?: nu
     body: JSON.stringify({ steps }),
   })
   return await res.json() as FunnelResult
+}
+
+// ── SEO audit / PageSpeed / Branding ─────────────────────────────────────────────
+
+async function jsonOrThrow<T>(res: Response): Promise<T> {
+  const data = await res.json() as T & { error?: string }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}
+
+export async function fetchSeo(url: string): Promise<SeoReport> {
+  const res = await apiFetch(`${BASE}/seo?url=${encodeURIComponent(url)}`, { headers: hdrs() })
+  return jsonOrThrow<SeoReport>(res)
+}
+
+export async function fetchPageSpeed(url: string, strategy: 'mobile' | 'desktop'): Promise<PageSpeedResult> {
+  const res = await apiFetch(`${BASE}/pagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}`, { headers: hdrs() })
+  return jsonOrThrow<PageSpeedResult>(res)
+}
+
+export async function fetchBranding(site: string): Promise<Branding | null> {
+  const res = await apiFetch(`${BASE}/branding?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { branding: Branding | null }).branding
+}
+
+export async function saveBranding(site: string, body: { product_name?: string | null; logo_url?: string | null; primary?: string | null }): Promise<void> {
+  const res = await apiFetch(`${BASE}/branding?site=${encodeURIComponent(site)}`, {
+    method: 'PUT',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  await jsonOrThrow(res)
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────

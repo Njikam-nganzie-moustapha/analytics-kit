@@ -21,6 +21,23 @@ export function parseFilename(raw: string | undefined): { filename: string } | n
   return { filename: raw }
 }
 
+// Audit target URL: http(s) only, public host, length-capped. Blocks the
+// obvious SSRF targets (localhost, link-local, private ranges) before fetch.
+export function parseAuditUrl(raw: string | undefined): { url: string } | null {
+  if (!raw || raw.length > 2048) return null
+  let u: URL
+  try { u = new URL(raw) } catch { return null }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  const host = u.hostname.toLowerCase()
+  if (
+    host === 'localhost' || host === '0.0.0.0' || host.endsWith('.local') ||
+    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    host === '[::1]' || host.startsWith('[fc') || host.startsWith('[fd')
+  ) return null
+  return { url: u.toString() }
+}
+
 export interface FunnelStepInput { label: string; type: 'url' | 'event'; match: string }
 
 // Validates a funnel definition: 2–8 ordered steps, each matching a URL

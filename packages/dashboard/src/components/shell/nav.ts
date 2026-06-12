@@ -2,17 +2,19 @@ import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard, Share2, Globe, MonitorSmartphone, MousePointerClick,
   Film, Filter, Gauge, Bug, Tag, Map as MapIcon, Target, Clock, Bell, MessageSquare,
+  Search, Zap, Palette,
 } from 'lucide-react'
 
 export type View =
   | 'overview'
   | 'traffic' | 'geo' | 'devices'
   | 'behavior' | 'sessions' | 'funnels'
-  | 'performance'
+  | 'performance' | 'seo' | 'pagespeed'
   | 'errors' | 'releases' | 'sourcemaps'
   | 'conversions'
   | 'cron' | 'alerts'
   | 'feedback'
+  | 'branding'
 
 export interface NavItem { id: View; label: string; icon: LucideIcon }
 export interface NavGroup { label: string | null; items: NavItem[] }
@@ -31,6 +33,10 @@ export const NAV: NavGroup[] = [
   ] },
   { label: 'Performance', items: [
     { id: 'performance', label: 'Performance', icon: Gauge },
+    { id: 'pagespeed', label: 'PageSpeed', icon: Zap },
+  ] },
+  { label: 'SEO', items: [
+    { id: 'seo', label: 'SEO audit', icon: Search },
   ] },
   { label: 'Errors', items: [
     { id: 'errors', label: 'Errors', icon: Bug },
@@ -45,6 +51,9 @@ export const NAV: NavGroup[] = [
     { id: 'alerts', label: 'Alerts', icon: Bell },
   ] },
   { label: null, items: [{ id: 'feedback', label: 'Feedback', icon: MessageSquare }] },
+  { label: 'Settings', items: [
+    { id: 'branding', label: 'Branding', icon: Palette },
+  ] },
 ]
 
 export const ALL_ITEMS: NavItem[] = NAV.flatMap(g => g.items)

@@ -2,8 +2,11 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { MiddlewareHandler } from 'hono'
 import { QueryTurso } from './turso'
-import { parseSite, parseRelease, parseFilename, parseSteps } from './validate'
+import { parseSite, parseRelease, parseFilename, parseSteps, parseAuditUrl } from './validate'
 import { signToken, verifyToken } from './token'
+import { auditHtml } from './seo'
+
+const HSL_RE = /^\d{1,3} \d{1,3}% \d{1,3}%$/
 
 interface Env {
   TURSO_URL:          string
@@ -12,6 +15,7 @@ interface Env {
   DASHBOARD_PASSWORD?: string
   CORS_ORIGINS?:      string
   ALLOW_QUERY_KEY?:   string // set to '1' to also accept ?api_key= (legacy); default header-only
+  PAGESPEED_API_KEY?: string // optional Google PageSpeed Insights key (higher quota)
 }
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -278,6 +282,83 @@ function makeApp(env: Env) {
     if (!steps) return c.json({ error: 'steps must be an array of 2–8 {type,label,match}' }, 400)
     const result = await db.computeFunnel(p.site, steps, fromParam(c))
     return c.json({ ...result, steps })
+  })
+
+  // ── SEO audit ───────────────────────────────────────────────────────────────
+  app.get('/seo', async c => {
+    const target = parseAuditUrl(c.req.query('url'))
+    if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
+    try {
+      const resp = await fetch(target.url, {
+        headers: { 'user-agent': 'analytics-kit-seo/1.0 (+https://analytics-kit)' },
+        redirect: 'follow',
+      })
+      if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
+      const html = (await resp.text()).slice(0, 1_500_000)
+      return c.json(auditHtml(html, resp.url || target.url))
+    } catch (e) {
+      return c.json({ error: `could not fetch page: ${e instanceof Error ? e.message : String(e)}` }, 502)
+    }
+  })
+
+  // ── PageSpeed (Google PSI lab data) ───────────────────────────────────────────
+  app.get('/pagespeed', async c => {
+    const target = parseAuditUrl(c.req.query('url'))
+    if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
+    const strategy = c.req.query('strategy') === 'desktop' ? 'desktop' : 'mobile'
+    const key = env.PAGESPEED_API_KEY ? `&key=${env.PAGESPEED_API_KEY}` : ''
+    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&category=performance${key}`
+    try {
+      const r = await fetch(psi)
+      const data = await r.json() as { lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, { displayValue?: string; numericValue?: number }> }; error?: { message?: string } }
+      if (data.error) return c.json({ error: data.error.message ?? 'PageSpeed error' }, 502)
+      const lr = data.lighthouseResult
+      const score = Math.round((lr?.categories?.performance?.score ?? 0) * 100)
+      const pick = (id: string, label: string) => {
+        const a = lr?.audits?.[id]
+        return { id, label, display: a?.displayValue ?? '—', numeric: a?.numericValue ?? null }
+      }
+      const metrics = [
+        pick('first-contentful-paint', 'First Contentful Paint'),
+        pick('largest-contentful-paint', 'Largest Contentful Paint'),
+        pick('total-blocking-time', 'Total Blocking Time'),
+        pick('cumulative-layout-shift', 'Cumulative Layout Shift'),
+        pick('speed-index', 'Speed Index'),
+        pick('interactive', 'Time to Interactive'),
+      ]
+      return c.json({ url: target.url, strategy, score, metrics })
+    } catch (e) {
+      return c.json({ error: `PageSpeed request failed: ${e instanceof Error ? e.message : String(e)}` }, 502)
+    }
+  })
+
+  // ── Branding (white-label) ────────────────────────────────────────────────────
+  app.get('/branding', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const branding = await db.getBranding(p.site)
+    return c.json({ branding })
+  })
+
+  app.put('/branding', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ product_name?: string | null; logo_url?: string | null; primary?: string | null }>().catch(() => ({} as Record<string, unknown>))
+    const update: { productName?: string | null; logoUrl?: string | null; primary?: string | null } = {}
+    if ('product_name' in body) update.productName = body.product_name ? String(body.product_name).slice(0, 60) : null
+    if ('logo_url' in body) {
+      const lu = body.logo_url ? String(body.logo_url).slice(0, 500) : null
+      if (lu && !/^https?:\/\//i.test(lu)) return c.json({ error: 'logo_url must be http(s)' }, 400)
+      update.logoUrl = lu
+    }
+    if ('primary' in body) {
+      const pr = body.primary ? String(body.primary).trim() : null
+      if (pr && !HSL_RE.test(pr)) return c.json({ error: 'primary must be an HSL triple like "262 83% 58%"' }, 400)
+      update.primary = pr
+    }
+    if (Object.keys(update).length === 0) return c.json({ error: 'no fields to update' }, 400)
+    await db.upsertBranding(p.site, update)
+    return c.json({ ok: true })
   })
 
   // ── Alert rules ───────────────────────────────────────────────────────────
