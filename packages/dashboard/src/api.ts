@@ -1,10 +1,12 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal } from './types'
 
-const BASE       = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
+const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
+const TOKEN_KEY = 'analyticskit_token'
+// Legacy fallback only — prefer password→token login. VITE_API_KEY ships the
+// key in the bundle, so it should be removed from the deploy once a
+// DASHBOARD_PASSWORD is configured on the query-api.
 const PRESET_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? ''
-const TOKEN_KEY  = 'analyticskit_token'
 
-// Use stored login token first, fall back to the pre-configured VITE_API_KEY
 export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) || PRESET_KEY }
 export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t) }
 export function clearToken()        { localStorage.removeItem(TOKEN_KEY) }
@@ -276,6 +278,36 @@ export async function uploadSourceMap(
 export async function deleteSourceMap(site: string, release: string, filename: string): Promise<void> {
   const q = new URLSearchParams({ site, release, filename })
   await apiFetch(`${BASE}/sourcemaps?${q}`, { method: 'DELETE', headers: hdrs() })
+}
+
+// ── Audience + overview ─────────────────────────────────────────────────────────
+
+export async function fetchTraffic(site: string, from?: number): Promise<TrafficSource[]> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/traffic?${q}`, { headers: hdrs() })
+  return (await res.json() as { sources: TrafficSource[] }).sources ?? []
+}
+
+export async function fetchGeo(site: string): Promise<GeoStat[]> {
+  const res = await apiFetch(`${BASE}/geo?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { geo: GeoStat[] }).geo ?? []
+}
+
+export async function fetchDevices(site: string): Promise<DeviceStat[]> {
+  const res = await apiFetch(`${BASE}/devices?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { devices: DeviceStat[] }).devices ?? []
+}
+
+export async function fetchConversions(site: string, from?: number): Promise<ConversionStat[]> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/conversions?${q}`, { headers: hdrs() })
+  return (await res.json() as { conversions: ConversionStat[] }).conversions ?? []
+}
+
+export async function fetchOverview(site: string, from?: number): Promise<{ summary: OverviewSummary; sites: SiteTotal[] }> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/overview?${q}`, { headers: hdrs() })
+  return await res.json() as { summary: OverviewSummary; sites: SiteTotal[] }
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────

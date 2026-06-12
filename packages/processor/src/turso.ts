@@ -106,6 +106,81 @@ export class ProcessorTurso {
     await this._batchedUpsert(stmts)
   }
 
+  // ── Traffic sources ──────────────────────────────────────────────────────────
+
+  async upsertTrafficSources(rows: import('./types').TrafficRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO traffic_sources (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, sessions, last_seen)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (site, channel, referrer_host, utm_source, utm_medium, utm_campaign) DO UPDATE SET
+                sessions  = sessions + excluded.sessions,
+                last_seen = MAX(last_seen, excluded.last_seen)`,
+        args: [
+          str(r.site), str(r.channel), str(r.referrerHost),
+          str(r.utmSource), str(r.utmMedium), str(r.utmCampaign),
+          int(r.sessions), int(r.lastSeen),
+        ],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Geo ──────────────────────────────────────────────────────────────────────
+
+  async upsertGeoStats(rows: import('./types').GeoRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO geo_stats (site, country, city, sessions, last_seen)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (site, country, city) DO UPDATE SET
+                sessions  = sessions + excluded.sessions,
+                last_seen = MAX(last_seen, excluded.last_seen)`,
+        args: [str(r.site), str(r.country), str(r.city), int(r.sessions), int(r.lastSeen)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Devices ──────────────────────────────────────────────────────────────────
+
+  async upsertDeviceStats(rows: import('./types').DeviceRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO device_stats (site, device_type, browser, os, sessions)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (site, device_type, browser, os) DO UPDATE SET
+                sessions = sessions + excluded.sessions`,
+        args: [str(r.site), str(r.deviceType), str(r.browser), str(r.os), int(r.sessions)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Conversions ──────────────────────────────────────────────────────────────
+
+  async upsertConversions(rows: import('./types').ConversionRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO conversions (site, kind, url, count, last_seen)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (site, kind, url) DO UPDATE SET
+                count     = count + excluded.count,
+                last_seen = MAX(last_seen, excluded.last_seen)`,
+        args: [str(r.site), str(r.kind), str(r.url), int(r.count), int(r.lastSeen)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
   // ── Checkpoints ──────────────────────────────────────────────────────────────
 
   async getCheckpoint(site: string): Promise<number> {
@@ -593,6 +668,46 @@ export class ProcessorTurso {
         event_count INTEGER NOT NULL DEFAULT 0,
         has_replay  INTEGER NOT NULL DEFAULT 0,
         has_error   INTEGER NOT NULL DEFAULT 0
+      )` }},
+      { type: 'close' },
+    ])
+
+    // Audience + conversions aggregates (traffic / geo / devices / conversions)
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS traffic_sources (
+        site          TEXT    NOT NULL,
+        channel       TEXT    NOT NULL,
+        referrer_host TEXT    NOT NULL DEFAULT '',
+        utm_source    TEXT    NOT NULL DEFAULT '',
+        utm_medium    TEXT    NOT NULL DEFAULT '',
+        utm_campaign  TEXT    NOT NULL DEFAULT '',
+        sessions      INTEGER NOT NULL DEFAULT 0,
+        last_seen     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, channel, referrer_host, utm_source, utm_medium, utm_campaign)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS geo_stats (
+        site      TEXT    NOT NULL,
+        country   TEXT    NOT NULL,
+        city      TEXT    NOT NULL DEFAULT '',
+        sessions  INTEGER NOT NULL DEFAULT 0,
+        last_seen INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, country, city)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS device_stats (
+        site        TEXT    NOT NULL,
+        device_type TEXT    NOT NULL,
+        browser     TEXT    NOT NULL,
+        os          TEXT    NOT NULL,
+        sessions    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, device_type, browser, os)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS conversions (
+        site      TEXT    NOT NULL,
+        kind      TEXT    NOT NULL,
+        url       TEXT    NOT NULL DEFAULT '',
+        count     INTEGER NOT NULL DEFAULT 0,
+        last_seen INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, kind, url)
       )` }},
       { type: 'close' },
     ])

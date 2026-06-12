@@ -62,8 +62,13 @@ describe('Worker auth enforcement', () => {
     expect(res.status).not.toBe(401)
   })
 
-  it('passes via ?api_key= query param', async () => {
+  it('rejects ?api_key= query param by default (header-only)', async () => {
     const res = await worker.fetch(req('/heatmap?site=test&api_key=secret-api-key'), ENV as never)
+    expect(res.status).toBe(401)
+  })
+
+  it('accepts ?api_key= when ALLOW_QUERY_KEY=1', async () => {
+    const res = await worker.fetch(req('/heatmap?site=test&api_key=secret-api-key'), { ...ENV, ALLOW_QUERY_KEY: '1' } as never)
     expect(res.status).not.toBe(401)
   })
 
@@ -97,7 +102,7 @@ describe('Worker /auth endpoint', () => {
     expect(res.status).toBe(401)
   })
 
-  it('POST /auth with correct password returns token', async () => {
+  it('POST /auth with correct password returns a signed token (not the static key)', async () => {
     const envWithPw = { ...ENV, DASHBOARD_PASSWORD: 'hunter2' }
     const res = await worker.fetch(req('/auth', {
       method: 'POST',
@@ -105,8 +110,29 @@ describe('Worker /auth endpoint', () => {
       body: JSON.stringify({ password: 'hunter2' }),
     }), envWithPw as never)
     expect(res.status).toBe(200)
-    const body = await res.json() as Record<string, unknown>
-    expect(body.token).toBe('secret-api-key')
+    const body = await res.json() as { token: string; exp: number }
+    expect(typeof body.token).toBe('string')
+    expect(body.token.length).toBeGreaterThan(20)
+    expect(body.token).not.toBe('secret-api-key')
+    expect(body.exp).toBeGreaterThan(Date.now())
+  })
+
+  it('signed token from /auth authorizes a data route', async () => {
+    const envWithPw = { ...ENV, DASHBOARD_PASSWORD: 'hunter2' }
+    const auth = await worker.fetch(req('/auth', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'hunter2' }),
+    }), envWithPw as never)
+    const { token } = await auth.json() as { token: string }
+    const res = await worker.fetch(req('/heatmap?site=test', { headers: { 'x-api-key': token } }), envWithPw as never)
+    expect(res.status).not.toBe(401)
+  })
+
+  it('HSTS + nosniff security headers present', async () => {
+    const res = await worker.fetch(req('/health'), ENV as never)
+    expect(res.headers.get('strict-transport-security')).toContain('max-age=')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
   })
 })
 

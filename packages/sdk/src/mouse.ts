@@ -46,11 +46,17 @@ export function startMouseTracking(cfg: TrackerConfig, push: PushFn): void {
     const pos = absPos(e)
     const selector = getSelector(e.target as Element)
     const activeZones = zones.filter(z => z.active).map(z => z.def.id)
+    // Capture the nearest anchor's href so the processor can classify
+    // tel:/mailto:/external clicks as conversions. Truncated; no PII beyond
+    // what the link itself exposes.
+    const anchor = (e.target as Element | null)?.closest?.('a')
+    const href = anchor?.getAttribute('href') || undefined
     addBreadcrumb({ category: 'click', message: selector })
     push({
       type: 'click',
       ...pos,
       target: selector,
+      ...(href ? { href: href.slice(0, 300) } : {}),
       ...(activeZones.length ? { zoneIds: activeZones } : {}),
     })
   })

@@ -4,7 +4,15 @@
 
 # analytics-kit — État du Projet
 
-_Dernière session: 2026-06-11 (SESSION 33 — AUTO-REFRESH DASHBOARD)_
+_Dernière session: 2026-06-11 (SESSION 34 — WEBFUL PARITY: shadcn UI + charts + audience/geo/conversions + security/loading)_
+
+> SESSION 34 sur la branche `feat/webful-parity-ui-overhaul` (pas encore mergée).
+> Refonte dashboard sur **shadcn/ui + Tailwind** (theme light/dark + toggle), nouvelles
+> features analytics (traffic sources/UTM, geo pays/ville, devices/browser/OS, conversions,
+> funnels, overview multi-site + **health score 0–100**), durcissement sécurité (**token
+> signé HMAC** au lieu de la clé statique, header-only api key, HSTS, CORS explicite, geo
+> sans IP), et **loading optimisé** (rrweb lazy-loaded, code-split par vue, recharts en
+> chunk séparé). Voir tableau SESSION 34 plus bas.
 
 ---
 
@@ -275,6 +283,21 @@ ANALYTICS_QUERY_API_KEY=916C30911E871973EF0A9EBF2661B635CF0C74A8F6A6202CD664754A
 | 31 | LIA backend redeploy | `npm run build` + `docker compose up -d saas-backend` — analytics env vars confirmed inside container |
 | 32 | Auth fix — 401 on all routes | `echo` added trailing newline to QUERY_API_KEY wrangler secret. Fixed: `.trim()` on both sides of comparison + `printf '%s'` in deploy.yml. Re-set GitHub secret to clean value. |
 | 32 | Schema fix — missing aggregated tables | Sessions/heatmap/zones tables absent → silent INSERT failures. Added to `ensureSchema()`. Reset checkpoint → re-ran processor → 18 cells + 4 sessions confirmed. |
+
+### SESSION 34 — Webful parity (branche `feat/webful-parity-ui-overhaul`)
+
+| Domaine | Ce qui a été fait |
+|---------|-------------------|
+| **UI foundation** | Tailwind + shadcn/ui ajoutés au dashboard (composants via CLI `npx shadcn add`). Tokens sémantiques light/dark (`src/index.css`), legacy CSS conservé et thémé (coexistence). Polices Fira Sans/Code. Theme toggle (`src/theme.tsx`). |
+| **Shell** | Sidebar groupée adaptative (`components/shell/Sidebar.tsx`) + Topbar (site picker combobox, time-range, refresh, theme) + Sheet mobile. 12 onglets plats → groupes (Audience/Behavior/Performance/Errors/Conversions/Monitoring). `nav.ts`. |
+| **Charts** | Recharts via `components/kit/` (AreaTrend, HealthGauge SVG, StatCard, BarRows, Section). |
+| **Nouvelles features** | Overview multi-site + **health score 0–100** ; Traffic sources (channel/UTM/referrer) ; Geo (pays/ville, flags) ; Devices (type/browser/OS) ; Conversions (tel/mailto/custom) ; Funnels (taux conversion). Sélecteur time-range (24h–90d) → param `from`. |
+| **Backend agrégations** | `processor/src/{traffic,geo,devices,conversions}.ts` + helpers `useragent.ts`/`referrer.ts`. Nouvelles tables `traffic_sources`/`geo_stats`/`device_stats`/`conversions` (ensureSchema processor + query-api). Routes `/traffic /geo /devices /conversions /overview`. |
+| **Capture geo** | Collector worker enrichit chaque event avec `request.cf` (country/city/region) — **jamais l'IP**. SDK: capture `href` sur clics (pour conversions). |
+| **Sécurité** | `/auth` renvoie un **token HMAC court** (`token.ts`) au lieu de `QUERY_API_KEY`. Guard accepte clé statique (S2S) OU token signé. api_key **header-only** en prod (`ALLOW_QUERY_KEY=1` pour réactiver query param). **HSTS** + security headers sur les 2 workers. `CORS_ORIGINS`/`DASHBOARD_PASSWORD` : snippet à appliquer dans deploy.yml (non commité — requiert scope `workflow` ; patch fourni séparément). `VITE_API_KEY` déprécié côté client. |
+| **Loading** | rrweb **lazy** (`import('rrweb')`), `React.lazy` par vue, `manualChunks` (react/recharts/rrweb/motion), preload polices, skeletons. Initial JS ~222KB ; recharts (516KB) chargé seulement à l'ouverture d'Overview. |
+| **Tests** | +21 tests (`processor/src/audience.test.ts`, query-api token/HSTS). **125 tests** au total (était 104). Tous verts. |
+| **Reste à faire** | Migrer les 11 composants legacy restants (ErrorList, SessionList, VitalsPanel, etc.) vers shadcn + supprimer les ~1580 lignes de `index.css` legacy (Phase 6, incrémental). Configurer secrets prod `ANALYTICS_CORS_ORIGINS` + `ANALYTICS_DASHBOARD_PASSWORD` puis retirer `VITE_API_KEY` de Vercel. |
 
 ---
 

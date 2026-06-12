@@ -173,6 +173,39 @@ export interface FeedbackRow {
   ts:      number
 }
 
+export interface TrafficSourceRow {
+  site: string; channel: string; referrerHost: string
+  utmSource: string; utmMedium: string; utmCampaign: string
+  sessions: number; lastSeen: number
+}
+
+export interface GeoStatRow {
+  site: string; country: string; city: string; sessions: number
+}
+
+export interface DeviceStatRow {
+  site: string; deviceType: string; browser: string; os: string; sessions: number
+}
+
+export interface ConversionStatRow {
+  site: string; kind: string; url: string; count: number; lastSeen: number
+}
+
+export interface OverviewSummary {
+  site: string
+  sessions: number
+  users: number
+  errorSessions: number
+  errorRate: number          // 0–100
+  conversions: number
+  vitalsGoodPct: number      // 0–100
+  perfP75: number            // ms
+  health: number             // 0–100
+  series: { day: number; sessions: number; errors: number }[]
+}
+
+export interface SiteTotal { site: string; sessions: number; lastSeen: number }
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -679,6 +712,110 @@ export class QueryTurso {
     }))
   }
 
+  // ── Audience: traffic / geo / devices ─────────────────────────────────────────
+
+  async getTrafficSources(site: string, from?: number): Promise<TrafficSourceRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (from !== undefined) { conds.push('last_seen >= ?'); args.push(int(from)) }
+    const rows = await this._query(
+      `SELECT site, channel, referrer_host, utm_source, utm_medium, utm_campaign, sessions, last_seen
+       FROM traffic_sources WHERE ${conds.join(' AND ')} ORDER BY sessions DESC LIMIT 500`,
+      args,
+    )
+    return rows.map(r => ({
+      site: r.site!, channel: r.channel!, referrerHost: r.referrer_host ?? '',
+      utmSource: r.utm_source ?? '', utmMedium: r.utm_medium ?? '', utmCampaign: r.utm_campaign ?? '',
+      sessions: parseInt(r.sessions ?? '0'), lastSeen: parseInt(r.last_seen ?? '0'),
+    }))
+  }
+
+  async getGeoStats(site: string): Promise<GeoStatRow[]> {
+    const rows = await this._query(
+      `SELECT site, country, city, sessions FROM geo_stats WHERE site = ? ORDER BY sessions DESC LIMIT 500`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      site: r.site!, country: r.country ?? 'XX', city: r.city ?? '', sessions: parseInt(r.sessions ?? '0'),
+    }))
+  }
+
+  async getDeviceStats(site: string): Promise<DeviceStatRow[]> {
+    const rows = await this._query(
+      `SELECT site, device_type, browser, os, sessions FROM device_stats WHERE site = ? ORDER BY sessions DESC LIMIT 500`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      site: r.site!, deviceType: r.device_type ?? 'desktop', browser: r.browser ?? 'Other',
+      os: r.os ?? 'Other', sessions: parseInt(r.sessions ?? '0'),
+    }))
+  }
+
+  async getConversions(site: string, from?: number): Promise<ConversionStatRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (from !== undefined) { conds.push('last_seen >= ?'); args.push(int(from)) }
+    const rows = await this._query(
+      `SELECT site, kind, url, count, last_seen FROM conversions WHERE ${conds.join(' AND ')} ORDER BY count DESC LIMIT 500`,
+      args,
+    )
+    return rows.map(r => ({
+      site: r.site!, kind: r.kind!, url: r.url ?? '', count: parseInt(r.count ?? '0'), lastSeen: parseInt(r.last_seen ?? '0'),
+    }))
+  }
+
+  async getSiteTotals(): Promise<SiteTotal[]> {
+    const rows = await this._query(
+      `SELECT site, COUNT(*) AS sessions, MAX(started) AS last_seen FROM sessions GROUP BY site ORDER BY sessions DESC LIMIT 200`,
+      [],
+    )
+    return rows.map(r => ({ site: r.site!, sessions: parseInt(r.sessions ?? '0'), lastSeen: parseInt(r.last_seen ?? '0') }))
+  }
+
+  // ── Overview + 0–100 health score ──────────────────────────────────────────────
+
+  async getOverview(site: string, from?: number): Promise<OverviewSummary> {
+    const fromT = from ?? 0
+    const [sess, vit, conv, perf, series] = await Promise.all([
+      this._query(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(has_error),0) AS errs, COUNT(DISTINCT uid) AS users
+         FROM sessions WHERE site = ? AND started >= ?`, [str(site), int(fromT)]),
+      this._query(
+        `SELECT COALESCE(SUM(good),0) AS g, COALESCE(SUM(total),0) AS t FROM vitals_summary WHERE site = ?`, [str(site)]),
+      this._query(
+        `SELECT COALESCE(SUM(count),0) AS c FROM conversions WHERE site = ? AND last_seen >= ?`, [str(site), int(fromT)]),
+      this._query(
+        `SELECT COALESCE(AVG(p75),0) AS p FROM page_perf WHERE site = ?`, [str(site)]),
+      this._query(
+        `SELECT started/86400000 AS day, COUNT(*) AS n, COALESCE(SUM(has_error),0) AS e
+         FROM sessions WHERE site = ? AND started >= ? GROUP BY day ORDER BY day ASC LIMIT 120`, [str(site), int(fromT)]),
+    ])
+
+    const sessions = parseInt(sess[0]?.n ?? '0')
+    const errorSessions = parseInt(sess[0]?.errs ?? '0')
+    const users = parseInt(sess[0]?.users ?? '0')
+    const conversions = parseInt(conv[0]?.c ?? '0')
+    const vGood = parseInt(vit[0]?.g ?? '0')
+    const vTotal = parseInt(vit[0]?.t ?? '0')
+    const perfP75 = Math.round(parseFloat(perf[0]?.p ?? '0'))
+
+    const vitalsGoodPct = vTotal > 0 ? Math.round((vGood / vTotal) * 100) : 0
+    const errorRate = sessions > 0 ? Math.round((errorSessions / sessions) * 100) : 0
+
+    // Health = blend of vitals (good %), reliability (1 - error rate), and speed
+    // (p75 mapped: ≤1s→100, ≥6s→0). Each weighted; clamped to 0–100.
+    const perfScore = perfP75 <= 0 ? 100 : Math.max(0, Math.min(100, Math.round(100 - ((perfP75 - 1000) / 5000) * 100)))
+    const reliabilityScore = 100 - errorRate
+    const vitalsScore = vTotal > 0 ? vitalsGoodPct : 100
+    const health = Math.max(0, Math.min(100, Math.round(0.45 * vitalsScore + 0.35 * reliabilityScore + 0.20 * perfScore)))
+
+    return {
+      site, sessions, users, errorSessions, errorRate, conversions,
+      vitalsGoodPct, perfP75, health,
+      series: series.map(r => ({ day: parseInt(r.day ?? '0'), sessions: parseInt(r.n ?? '0'), errors: parseInt(r.e ?? '0') })),
+    }
+  }
+
   async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
     const sql = `SELECT payload
                  FROM analytics_events
@@ -866,6 +1003,37 @@ export class QueryTurso {
           event_count INTEGER NOT NULL DEFAULT 0,
           has_replay  INTEGER NOT NULL DEFAULT 0,
           has_error   INTEGER NOT NULL DEFAULT 0
+        )` }},
+      { type: 'close' },
+    ])
+
+    // Audience + conversions aggregates — must exist before query-api SELECTs
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS traffic_sources (
+          site          TEXT    NOT NULL,
+          channel       TEXT    NOT NULL,
+          referrer_host TEXT    NOT NULL DEFAULT '',
+          utm_source    TEXT    NOT NULL DEFAULT '',
+          utm_medium    TEXT    NOT NULL DEFAULT '',
+          utm_campaign  TEXT    NOT NULL DEFAULT '',
+          sessions      INTEGER NOT NULL DEFAULT 0,
+          last_seen     INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, channel, referrer_host, utm_source, utm_medium, utm_campaign)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS geo_stats (
+          site TEXT NOT NULL, country TEXT NOT NULL, city TEXT NOT NULL DEFAULT '',
+          sessions INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, country, city)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS device_stats (
+          site TEXT NOT NULL, device_type TEXT NOT NULL, browser TEXT NOT NULL, os TEXT NOT NULL,
+          sessions INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, device_type, browser, os)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS conversions (
+          site TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL DEFAULT '',
+          count INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, kind, url)
         )` }},
       { type: 'close' },
     ])

@@ -11,6 +11,7 @@ import { cronRouter       } from './routes/cron'
 import { vitalsRouter     } from './routes/vitals'
 import { sourcemapsRouter } from './routes/sourcemaps'
 import { sitesRouter      } from './routes/sites'
+import { parseSite } from './validate'
 import type { QueryTurso } from './turso'
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -59,6 +60,32 @@ export function createApp(db: QueryTurso) {
   app.route('/cron',       cronRouter(db))
   app.route('/vitals',     vitalsRouter(db))
   app.route('/sourcemaps', sourcemapsRouter(db))
+
+  // Audience + overview (inline — mirror worker.ts)
+  const fromOf = (c: { req: { query: (k: string) => string | undefined } }) => {
+    const raw = c.req.query('from'); return raw ? parseInt(raw) : undefined
+  }
+  app.get('/traffic', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ sources: await db.getTrafficSources(p.site, fromOf(c)) })
+  })
+  app.get('/geo', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ geo: await db.getGeoStats(p.site) })
+  })
+  app.get('/devices', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ devices: await db.getDeviceStats(p.site) })
+  })
+  app.get('/conversions', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ conversions: await db.getConversions(p.site, fromOf(c)) })
+  })
+  app.get('/overview', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const [summary, sites] = await Promise.all([db.getOverview(p.site, fromOf(c)), db.getSiteTotals()])
+    return c.json({ summary, sites })
+  })
 
   return app
 }

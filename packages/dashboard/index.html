@@ -3,7 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Analytics Kit</title>
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="analytics-kit — heatmaps, session replay, web vitals, errors, traffic & conversions for the LIA platform." />
+    <title>analytics-kit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+    />
+    <script>
+      // Apply persisted/system theme before first paint to avoid a flash.
+      (function () {
+        try {
+          var t = localStorage.getItem('analyticskit_theme')
+          if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+          if (t === 'dark') document.documentElement.classList.add('dark')
+          document.documentElement.style.colorScheme = t
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,19 +1,33 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { HeatmapOverlay  } from './components/HeatmapOverlay'
-import { ZoneStats       } from './components/ZoneStats'
-import { SessionList     } from './components/SessionList'
-import { ErrorList       } from './components/ErrorList'
-import { CronMonitors    } from './components/CronMonitors'
-import { SourceMapsTab   } from './components/SourceMapsTab'
-import { VitalsPanel     } from './components/VitalsPanel'
-import { OverviewPanel   } from './components/OverviewPanel'
-import { ReleasesTab       } from './components/ReleasesTab'
-import { PerformancePanel  } from './components/PerformancePanel'
-import { FeedbackList      } from './components/FeedbackList'
-import { AlertsTab         } from './components/AlertsTab'
-import { ReplayModal     } from './components/ReplayModal'
-import { LoginScreen     } from './components/LoginScreen'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { SidebarNav } from '@/components/shell/Sidebar'
+import { Topbar } from '@/components/shell/Topbar'
+import { LoadingState, ErrorState, EmptyState, ComingSoon } from '@/components/shell/states'
+import { SavedViewsBar } from '@/components/shell/SavedViewsBar'
+import type { View } from '@/components/shell/nav'
+import { viewLabel } from '@/components/shell/nav'
+import { resolveRange, type RangeKey } from '@/timerange'
+import { LoginScreen } from './components/LoginScreen'
+
+const HeatmapOverlay   = lazy(() => import('./components/HeatmapOverlay').then(m => ({ default: m.HeatmapOverlay })))
+const ZoneStats        = lazy(() => import('./components/ZoneStats').then(m => ({ default: m.ZoneStats })))
+const SessionList      = lazy(() => import('./components/SessionList').then(m => ({ default: m.SessionList })))
+const ErrorList        = lazy(() => import('./components/ErrorList').then(m => ({ default: m.ErrorList })))
+const CronMonitors     = lazy(() => import('./components/CronMonitors').then(m => ({ default: m.CronMonitors })))
+const SourceMapsTab    = lazy(() => import('./components/SourceMapsTab').then(m => ({ default: m.SourceMapsTab })))
+const VitalsPanel      = lazy(() => import('./components/VitalsPanel').then(m => ({ default: m.VitalsPanel })))
+const OverviewView     = lazy(() => import('./components/overview/OverviewView').then(m => ({ default: m.OverviewView })))
+const TrafficView      = lazy(() => import('./components/audience/TrafficView').then(m => ({ default: m.TrafficView })))
+const GeoView          = lazy(() => import('./components/audience/GeoView').then(m => ({ default: m.GeoView })))
+const DevicesView      = lazy(() => import('./components/audience/DevicesView').then(m => ({ default: m.DevicesView })))
+const ConversionsView  = lazy(() => import('./components/conversions/ConversionsView').then(m => ({ default: m.ConversionsView })))
+const FunnelsView      = lazy(() => import('./components/behavior/FunnelsView').then(m => ({ default: m.FunnelsView })))
+const ReleasesTab      = lazy(() => import('./components/ReleasesTab').then(m => ({ default: m.ReleasesTab })))
+const PerformancePanel = lazy(() => import('./components/PerformancePanel').then(m => ({ default: m.PerformancePanel })))
+const FeedbackList     = lazy(() => import('./components/FeedbackList').then(m => ({ default: m.FeedbackList })))
+const AlertsTab        = lazy(() => import('./components/AlertsTab').then(m => ({ default: m.AlertsTab })))
+const ReplayModal      = lazy(() => import('./components/ReplayModal').then(m => ({ default: m.ReplayModal })))
 import {
   fetchHeatmap, fetchZones, fetchSessions, fetchReplay,
   fetchErrors, fetchCronMonitors, fetchVitals,
@@ -21,24 +35,8 @@ import {
 } from './api'
 import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, SavedView } from './types'
 
-type Tab = 'overview' | 'heatmap' | 'zones' | 'sessions' | 'errors' | 'feedback' | 'releases' | 'performance' | 'vitals' | 'cron' | 'sourcemaps' | 'alerts'
-
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'overview',     label: 'Overview',     icon: '⬡' },
-  { id: 'heatmap',      label: 'Heatmap',      icon: '◈' },
-  { id: 'zones',        label: 'Zones',        icon: '⊡' },
-  { id: 'sessions',     label: 'Sessions',     icon: '◉' },
-  { id: 'errors',       label: 'Errors',       icon: '⊘' },
-  { id: 'feedback',     label: 'Feedback',     icon: '✦' },
-  { id: 'releases',     label: 'Releases',     icon: '⊛' },
-  { id: 'performance',  label: 'Performance',  icon: '◎' },
-  { id: 'vitals',       label: 'Vitals',       icon: '♡' },
-  { id: 'cron',         label: 'Cron',         icon: '⏱' },
-  { id: 'alerts',       label: 'Alerts',       icon: '⚑' },
-  { id: 'sourcemaps',   label: 'Source Maps',  icon: '⊞' },
-]
-
 const VIEWS_KEY = 'analyticskit_views'
+const RANGE_KEY = 'analyticskit_range'
 
 function loadViews(): SavedView[] {
   try { return JSON.parse(localStorage.getItem(VIEWS_KEY) ?? '[]') } catch { return [] }
@@ -46,18 +44,48 @@ function loadViews(): SavedView[] {
 function saveViews(v: SavedView[]): void {
   localStorage.setItem(VIEWS_KEY, JSON.stringify(v.slice(0, 12)))
 }
+function initialRange(): RangeKey {
+  const r = localStorage.getItem(RANGE_KEY)
+  return (['24h', '7d', '14d', '30d', '90d'].includes(r ?? '') ? r : '7d') as RangeKey
+}
 
 const contentVariants = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.2, ease: 'easeOut' } },
-  exit:    { opacity: 0, y: -6, transition: { duration: 0.12 } },
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.18, ease: 'easeOut' } },
+  exit: { opacity: 0, y: -4, transition: { duration: 0.1 } },
 }
 
 export function App() {
-  const [authChecked,   setAuthChecked]   = useState(false)
-  const [authRequired,  setAuthRequired]  = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authRequired, setAuthRequired] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
   const [availableSites, setAvailableSites] = useState<string[]>([])
+
+  const [view, setView] = useState<View>('overview')
+  const [site, setSite] = useState('')
+  const [url, setUrl] = useState('')
+  const [query, setQuery] = useState<{ site: string; url: string }>({ site: '', url: '' })
+  const [range, setRange] = useState<RangeKey>(initialRange)
+  const [mobileNav, setMobileNav] = useState(false)
+
+  const [savedViews, setSavedViews] = useState<SavedView[]>(loadViews)
+  const [refreshEvery, setRefreshEvery] = useState(0)
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+
+  const [cells, setCells] = useState<HeatmapCell[]>([])
+  const [zones, setZones] = useState<ZoneRow[]>([])
+  const [sessions, setSessions] = useState<SessionRow[]>([])
+  const [errors, setErrors] = useState<ErrorGroup[]>([])
+  const [monitors, setMonitors] = useState<CronMonitor[]>([])
+  const [vitals, setVitals] = useState<VitalRow[]>([])
+
+  const [replaySid, setReplaySid] = useState('')
+  const [replayEvents, setReplayEvents] = useState<unknown[]>([])
+  const [replayLoading, setReplayLoading] = useState(false)
 
   useEffect(() => {
     authStatus()
@@ -69,71 +97,46 @@ export function App() {
         if (isAuth) {
           fetchSites().then(sites => {
             setAvailableSites(sites)
-            if (sites.length > 0) {
-              setSiteInput(sites[0])
-              const q = { site: sites[0], url: '' }
-              setQuery(q)
-            }
+            if (sites.length > 0) { setSite(sites[0]); setQuery({ site: sites[0], url: '' }) }
           })
         }
       })
       .catch(() => setAuthChecked(true))
   }, [])
 
-  const [siteInput, setSiteInput] = useState('')
-  const [urlInput,  setUrlInput]  = useState('')
-  const [tab,  setTab]  = useState<Tab>('overview')
-  const [query, setQuery] = useState<{ site: string; url: string }>({ site: '', url: '' })
-  const [savedViews,     setSavedViews]     = useState<SavedView[]>(loadViews)
-  const [refreshEvery,   setRefreshEvery]   = useState(0)   // seconds; 0 = off
-  const [lastRefreshed,  setLastRefreshed]  = useState<Date | null>(null)
-  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const [loading,  setLoading]  = useState(false)
-  const [loadError, setLoadError] = useState('')
-
-  const [cells,    setCells]    = useState<HeatmapCell[]>([])
-  const [zones,    setZones]    = useState<ZoneRow[]>([])
-  const [sessions, setSessions] = useState<SessionRow[]>([])
-  const [errors,   setErrors]   = useState<ErrorGroup[]>([])
-  const [monitors, setMonitors] = useState<CronMonitor[]>([])
-  const [vitals,   setVitals]   = useState<VitalRow[]>([])
-
-  // For overview, prefetch sessions + errors + vitals in parallel
-  const [overviewReady, setOverviewReady] = useState(false)
-
-  const [replaySid,     setReplaySid]     = useState('')
-  const [replayEvents,  setReplayEvents]  = useState<unknown[]>([])
-  const [replayLoading, setReplayLoading] = useState(false)
+  useEffect(() => { localStorage.setItem(RANGE_KEY, range) }, [range])
 
   async function openReplay(sid: string) {
     setReplaySid(sid); setReplayLoading(true)
-    try   { setReplayEvents(await fetchReplay(sid)) }
+    try { setReplayEvents(await fetchReplay(sid)) }
     catch { setReplayEvents([]) }
     finally { setReplayLoading(false) }
   }
   function closeReplay() { setReplaySid(''); setReplayEvents([]) }
 
-  const load = useCallback(async (q: { site: string; url: string }, t: Tab, silent = false) => {
-    if (!q.site) return
+  // Time-window start for the selected range — stable until the range changes.
+  const from = useMemo(() => resolveRange(range).from, [range])
+
+  // Views that fetch their own data (self-contained, range-aware).
+  const SELF_FETCH: ReadonlySet<View> = useMemo(
+    () => new Set<View>(['overview', 'traffic', 'geo', 'devices', 'conversions', 'funnels']), [])
+
+  const load = useCallback(async (q: { site: string; url: string }, v: View, silent = false) => {
+    if (!q.site || SELF_FETCH.has(v)) return
     if (!silent) setLoading(true)
     setLoadError('')
     try {
-      if (t === 'overview') {
-        const [s, e, v] = await Promise.all([
-          fetchSessions(q.site, { limit: 200 }),
-          fetchErrors(q.site, { limit: 200 }),
-          fetchVitals(q.site),
+      if (v === 'behavior') {
+        const [c, z] = await Promise.all([
+          fetchHeatmap(q.site, q.url || undefined),
+          fetchZones(q.site, q.url || undefined),
         ])
-        setSessions(s); setErrors(e); setVitals(v)
-        setOverviewReady(true)
+        setCells(c); setZones(z)
       }
-      if (t === 'heatmap')  setCells(await fetchHeatmap(q.site, q.url || undefined))
-      if (t === 'zones')    setZones(await fetchZones(q.site, q.url || undefined))
-      if (t === 'sessions') setSessions(await fetchSessions(q.site, { limit: 200 }))
-      if (t === 'errors')   setErrors(await fetchErrors(q.site, { limit: 200 }))
-      if (t === 'vitals')   setVitals(await fetchVitals(q.site, q.url || undefined))
-      if (t === 'cron')        setMonitors(await fetchCronMonitors(q.site))
+      if (v === 'sessions') setSessions(await fetchSessions(q.site, { limit: 200 }))
+      if (v === 'errors') setErrors(await fetchErrors(q.site, { limit: 200 }))
+      if (v === 'performance') setVitals(await fetchVitals(q.site, q.url || undefined))
+      if (v === 'cron') setMonitors(await fetchCronMonitors(q.site))
       setLastRefreshed(new Date())
     } catch (e: unknown) {
       if ((e as { status?: number }).status === 401) { setAuthenticated(false); return }
@@ -141,23 +144,21 @@ export function App() {
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [])
+  }, [SELF_FETCH])
 
-  useEffect(() => {
-    if (query.site) load(query, tab)
-  }, [tab, query, load])
+  useEffect(() => { if (query.site) load(query, view) }, [view, query, load])
 
   useEffect(() => {
     if (refreshRef.current) clearInterval(refreshRef.current)
     if (!refreshEvery || !query.site) return
-    refreshRef.current = setInterval(() => load(query, tab, true), refreshEvery * 1000)
+    refreshRef.current = setInterval(() => load(query, view, true), refreshEvery * 1000)
     return () => { if (refreshRef.current) clearInterval(refreshRef.current) }
-  }, [refreshEvery, query, tab, load])
+  }, [refreshEvery, query, view, load])
 
-  function handleLoad() {
-    const q = { site: siteInput.trim(), url: urlInput.trim() }
+  function selectSite(s: string) {
+    setSite(s)
+    const q = { site: s, url: url.trim() }
     setQuery(q)
-    load(q, tab)
   }
 
   function handleErrorUpdate(fp: string, update: Partial<ErrorGroup>) {
@@ -165,225 +166,120 @@ export function App() {
   }
 
   function saveView() {
-    const site = siteInput.trim()
-    if (!site) return
-    const id    = `${Date.now()}`
-    const label = `${site}${urlInput ? ` ${urlInput}` : ''} → ${tab}`
-    const view: SavedView = { id, label, site, env: 'production', url: urlInput, tab }
-    const next = [view, ...savedViews.filter(v => v.label !== label)].slice(0, 12)
-    setSavedViews(next)
-    saveViews(next)
+    if (!site.trim()) return
+    const label = `${site}${url ? ` ${url}` : ''} → ${viewLabel(view)}`
+    const v: SavedView = { id: `${Date.now()}`, label, site, env: 'production', url, tab: view }
+    const next = [v, ...savedViews.filter(x => x.label !== label)].slice(0, 12)
+    setSavedViews(next); saveViews(next)
   }
-
   function removeView(id: string) {
     const next = savedViews.filter(v => v.id !== id)
-    setSavedViews(next)
-    saveViews(next)
+    setSavedViews(next); saveViews(next)
   }
-
   function applyView(v: SavedView) {
-    setSiteInput(v.site)
-    setUrlInput(v.url)
-    setTab(v.tab as Tab)
-    const q = { site: v.site, url: v.url }
-    setQuery(q)
-    load(q, v.tab as Tab)
+    setSite(v.site); setUrl(v.url); setView(v.tab as View)
+    setQuery({ site: v.site, url: v.url })
   }
 
   function renderContent() {
-    if (loading) return (
-      <div className="loading">
-        <motion.div
-          style={{ width: 30, height: 30, borderRadius: '50%', border: '2px solid var(--border-2)', borderTopColor: 'var(--accent)' }}
-          animate={{ rotate: 360 }}
-          transition={{ duration: 0.65, repeat: Infinity, ease: 'linear' }}
-        />
-        <span>Loading…</span>
-      </div>
-    )
-    if (loadError) return (
-      <div className="empty">
-        <span className="empty-title" style={{ color: 'var(--error)' }}>Request failed</span>
-        <span>{loadError}</span>
-      </div>
-    )
-    if (tab === 'overview') return (
-      <OverviewPanel sessions={sessions} errors={errors} vitals={vitals} />
-    )
-    if (tab === 'heatmap')  return <HeatmapOverlay cells={cells} />
-    if (tab === 'zones')    return <ZoneStats zones={zones} />
-    if (tab === 'sessions') return <SessionList sessions={sessions} site={query.site} onReplay={openReplay} />
-    if (tab === 'errors')   return (
-      <ErrorList errors={errors} site={query.site} onUpdate={handleErrorUpdate} />
-    )
-    if (tab === 'vitals')   return <VitalsPanel vitals={vitals} />
-    if (tab === 'cron')       return (
-      <CronMonitors
-        monitors={monitors}
-        site={query.site}
-        onDelete={id => setMonitors(prev => prev.filter(m => m.monitorId !== id))}
-      />
-    )
-    if (tab === 'releases')    return <ReleasesTab site={query.site} />
-    if (tab === 'performance') return <PerformancePanel site={query.site} url={query.url || undefined} />
-    if (tab === 'feedback')    return <FeedbackList site={query.site} />
-    if (tab === 'alerts')      return <AlertsTab site={query.site} />
-    if (tab === 'sourcemaps')  return <SourceMapsTab site={query.site} />
+    if (loading) return <LoadingState />
+    if (loadError) return <ErrorState message={loadError} onRetry={() => load(query, view)} />
+
+    switch (view) {
+      case 'overview': return <OverviewView site={query.site} from={from} />
+      case 'traffic': return <TrafficView site={query.site} from={from} />
+      case 'geo': return <GeoView site={query.site} />
+      case 'devices': return <DevicesView site={query.site} />
+      case 'conversions': return <ConversionsView site={query.site} from={from} />
+      case 'funnels': return <FunnelsView site={query.site} from={from} />
+      case 'behavior': return (
+        <div className="space-y-6">
+          <HeatmapOverlay cells={cells} />
+          <ZoneStats zones={zones} />
+        </div>
+      )
+      case 'sessions': return <SessionList sessions={sessions} site={query.site} onReplay={openReplay} />
+      case 'errors': return <ErrorList errors={errors} site={query.site} onUpdate={handleErrorUpdate} />
+      case 'performance': return (
+        <div className="space-y-6">
+          <VitalsPanel vitals={vitals} />
+          <PerformancePanel site={query.site} url={query.url || undefined} />
+        </div>
+      )
+      case 'releases': return <ReleasesTab site={query.site} />
+      case 'sourcemaps': return <SourceMapsTab site={query.site} />
+      case 'cron': return (
+        <CronMonitors monitors={monitors} site={query.site}
+          onDelete={id => setMonitors(prev => prev.filter(m => m.monitorId !== id))} />
+      )
+      case 'alerts': return <AlertsTab site={query.site} />
+      case 'feedback': return <FeedbackList site={query.site} />
+      default: return <ComingSoon title={viewLabel(view)} />
+    }
   }
 
   if (!authChecked) return null
-  if (authRequired && !authenticated) {
-    return <LoginScreen onSuccess={() => setAuthenticated(true)} />
-  }
+  if (authRequired && !authenticated) return <LoginScreen onSuccess={() => setAuthenticated(true)} />
 
   return (
-    <div className="app">
-      <header className="header">
-        <span className="header-logo">analytics<span>kit</span></span>
-        <div className="header-form">
-          <input
-            className="input input-site"
-            placeholder="site ID"
-            value={siteInput}
-            onChange={e => setSiteInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleLoad()}
-            list="sites-datalist"
-          />
-          {availableSites.length > 0 && (
-            <datalist id="sites-datalist">
-              {availableSites.map(s => <option key={s} value={s} />)}
-            </datalist>
-          )}
-          <input
-            className="input input-url"
-            placeholder="/url (optional)"
-            value={urlInput}
-            onChange={e => setUrlInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleLoad()}
-          />
-          <button
-            className="btn"
-            onClick={handleLoad}
-            disabled={!siteInput.trim() || loading}
-          >
-            Load
-          </button>
-          {query.site && (
-            <button
-              className="btn btn-ghost"
-              title="Bookmark current view"
-              onClick={saveView}
-            >
-              ⊕
-            </button>
-          )}
-          <select
-            className="input input-refresh"
-            value={refreshEvery}
-            onChange={e => setRefreshEvery(Number(e.target.value))}
-            title="Auto-refresh interval"
-          >
-            <option value={0}>Auto-refresh off</option>
-            <option value={30}>Every 30s</option>
-            <option value={60}>Every 1m</option>
-            <option value={300}>Every 5m</option>
-          </select>
-          {lastRefreshed && (
-            <span className="refresh-ts" title={`Last refreshed: ${lastRefreshed.toLocaleTimeString()}`}>
-              ↻ {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </span>
-          )}
-          {authRequired && (
-            <button
-              className="btn btn-ghost"
-              onClick={() => { clearToken(); setAuthenticated(false) }}
-            >
-              Sign out
-            </button>
-          )}
-        </div>
-      </header>
+    <div className="flex h-dvh flex-col">
+      <div className="flex flex-1 overflow-hidden">
+        <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
+          <SidebarNav active={view} onSelect={setView} />
+        </aside>
 
-      {availableSites.length > 0 && (
-        <div className="site-chips">
-          {availableSites.map((s: string) => (
-            <button
-              key={s}
-              className={`site-chip ${siteInput === s ? 'active' : ''}`}
-              onClick={() => {
-                setSiteInput(s)
-                const q = { site: s, url: urlInput.trim() }
-                setQuery(q)
-                load(q, tab)
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-      {savedViews.length > 0 && (
-        <div className="site-chips saved-views-chips">
-          <span className="saved-views-label">Saved:</span>
-          {savedViews.map(v => (
-            <span key={v.id} className="saved-view-chip">
-              <button className="saved-view-btn" onClick={() => applyView(v)} title={v.label}>
-                {v.label}
-              </button>
-              <button className="saved-view-remove" onClick={() => removeView(v.id)} title="Remove">×</button>
-            </span>
-          ))}
-        </div>
-      )}
+        <Sheet open={mobileNav} onOpenChange={setMobileNav}>
+          <SheetContent side="left" className="w-72 border-sidebar-border bg-sidebar p-0">
+            <SidebarNav active={view} onSelect={setView} onNavigate={() => setMobileNav(false)} />
+          </SheetContent>
+        </Sheet>
 
-      <nav className="tabs">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`tab ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
-            <span className="tab-icon">{t.icon}</span>
-            {t.label}
-            {tab === t.id && (
-              <motion.span
-                className="tab-indicator"
-                layoutId="tab-indicator"
-                transition={{ type: 'spring', stiffness: 500, damping: 38 }}
-              />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Topbar
+            view={view}
+            sites={availableSites}
+            site={site}
+            onSite={selectSite}
+            url={url}
+            onUrl={setUrl}
+            range={range}
+            onRange={setRange}
+            refreshEvery={refreshEvery}
+            onRefreshEvery={setRefreshEvery}
+            lastRefreshed={lastRefreshed}
+            onSaveView={saveView}
+            authRequired={authRequired}
+            onSignOut={() => { clearToken(); setAuthenticated(false) }}
+            onMenu={() => setMobileNav(true)}
+          />
+
+          <main className="flex-1 overflow-y-auto p-4 md:p-6">
+            {savedViews.length > 0 && (
+              <SavedViewsBar views={savedViews} onApply={applyView} onRemove={removeView} />
             )}
-          </button>
-        ))}
-      </nav>
-
-      <main className="content">
-        {!query.site ? (
-          <div className="empty">
-            <span className="empty-title">No site loaded</span>
-            <span>Enter a site ID above and press Load.</span>
-          </div>
-        ) : (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`${query.site}--${tab}`}
-              variants={contentVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-            >
-              {renderContent()}
-            </motion.div>
-          </AnimatePresence>
-        )}
-      </main>
+            {!query.site ? (
+              <EmptyState title="No site loaded" hint="Pick a site from the selector above to get started." />
+            ) : (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`${query.site}--${view}`}
+                  variants={contentVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                >
+                  <Suspense fallback={<LoadingState />}>{renderContent()}</Suspense>
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </main>
+        </div>
+      </div>
 
       {replaySid && (
-        <ReplayModal
-          sid={replaySid}
-          events={replayEvents}
-          loading={replayLoading}
-          onClose={closeReplay}
-        />
+        <Suspense fallback={null}>
+          <ReplayModal sid={replaySid} events={replayEvents} loading={replayLoading} onClose={closeReplay} />
+        </Suspense>
       )}
     </div>
   )

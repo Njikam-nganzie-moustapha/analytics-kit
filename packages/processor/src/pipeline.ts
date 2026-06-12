@@ -5,6 +5,10 @@ import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
 import { buildVitalsBuckets } from './vitals'
 import { buildPagePerf } from './perf'
+import { buildTrafficSources } from './traffic'
+import { buildGeoStats } from './geo'
+import { buildDeviceStats } from './devices'
+import { buildConversions } from './conversions'
 import { createConsumer, symbolicateStack, type SourceMapConsumer } from './symbolicate'
 import { checkAlerts } from './alerts'
 
@@ -36,6 +40,10 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
     const errorGroups   = buildErrorGroups(events)
     const vitalsBuckets = buildVitalsBuckets(events)
     const pagePerf      = buildPagePerf(events)
+    const trafficRows   = buildTrafficSources(events)
+    const geoRows       = buildGeoStats(events)
+    const deviceRows    = buildDeviceStats(events)
+    const conversionRows = buildConversions(events)
 
     const feedback = events
       .filter(e => e.type === 'user_feedback' && typeof e.message === 'string' && e.message.trim())
@@ -59,10 +67,14 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
       db.upsertErrorDailyStats(errorGroups),
       db.upsertPagePerf(pagePerf),
       db.insertFeedback(feedback),
+      db.upsertTrafficSources(trafficRows),
+      db.upsertGeoStats(geoRows),
+      db.upsertDeviceStats(deviceRows),
+      db.upsertConversions(conversionRows),
     ]).then(results => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf', 'feedback']
+          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf', 'feedback', 'traffic', 'geo', 'devices', 'conversions']
           console.error(`[processor] ${site} ${names[i]} upsert failed:`, r.reason)
         }
       })

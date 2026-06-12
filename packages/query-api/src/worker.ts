@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { MiddlewareHandler } from 'hono'
 import { QueryTurso } from './turso'
 import { parseSite, parseRelease, parseFilename } from './validate'
+import { signToken, verifyToken } from './token'
 
 interface Env {
   TURSO_URL:          string
@@ -9,18 +11,39 @@ interface Env {
   QUERY_API_KEY:      string
   DASHBOARD_PASSWORD?: string
   CORS_ORIGINS?:      string
+  ALLOW_QUERY_KEY?:   string // set to '1' to also accept ?api_key= (legacy); default header-only
+}
+
+const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '1; mode=block')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Cross-Origin-Resource-Policy', 'same-site')
+  c.header('Cache-Control', 'no-store')
+  c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+  // API returns JSON only — disallow rendering as a page
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
 }
 
 const VALID_STATUSES = new Set(['open', 'ignored', 'resolved', 'regressed'])
 
 // Per-isolate schema init flag
 let schemaReady = false
+let warnedCors = false
 
 function makeApp(env: Env) {
   const db  = new QueryTurso(env.TURSO_URL, env.TURSO_TOKEN)
   const app = new Hono()
 
+  app.use('*', securityHeaders)
+
   const origins = env.CORS_ORIGINS?.split(',').map(s => s.trim()) ?? ['*']
+  if (origins.length === 1 && origins[0] === '*' && !warnedCors) {
+    warnedCors = true
+    console.warn('[query-api] CORS_ORIGINS not set — wildcard CORS active. Set it to the dashboard origin in production.')
+  }
   app.use('*', cors({
     origin: origins.length === 1 && origins[0] === '*' ? '*' : origins,
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -48,16 +71,24 @@ function makeApp(env: Env) {
     if (!env.DASHBOARD_PASSWORD || !env.QUERY_API_KEY) return c.json({ token: null, required: false })
     const body = await c.req.json<{ password?: string }>().catch(() => ({} as { password?: string }))
     if (body.password !== env.DASHBOARD_PASSWORD) return c.json({ error: 'invalid password' }, 401)
-    return c.json({ token: env.QUERY_API_KEY, required: true })
+    // Hand back a short-lived signed token — never the static QUERY_API_KEY.
+    const { token, exp } = await signToken(env.QUERY_API_KEY)
+    return c.json({ token, exp, required: true })
   })
 
-  // API key guard for all data routes
+  // Auth guard for all data routes. Accepts the static key (server-to-server)
+  // or an unexpired signed session token. Header-only by default — query-string
+  // keys leak via logs/proxies/referrer; set ALLOW_QUERY_KEY=1 to opt back in.
   app.use('*', async (c, next) => {
     if (!env.QUERY_API_KEY) return next()
-    const provided  = (c.req.header('x-api-key') ?? c.req.query('api_key') ?? '').trim()
-    const expected  = env.QUERY_API_KEY.trim()
-    if (provided !== expected) return c.json({ error: 'unauthorized' }, 401)
-    return next()
+    const expected = env.QUERY_API_KEY.trim()
+    const headerKey = (c.req.header('x-api-key') ?? '').trim()
+    const queryKey = env.ALLOW_QUERY_KEY === '1' ? (c.req.query('api_key') ?? '').trim() : ''
+    const provided = headerKey || queryKey
+    if (!provided) return c.json({ error: 'unauthorized' }, 401)
+    if (provided === expected) return next()
+    if (await verifyToken(provided, expected)) return next()
+    return c.json({ error: 'unauthorized' }, 401)
   })
 
   // ── Heatmap ───────────────────────────────────────────────────────────────
@@ -156,6 +187,51 @@ function makeApp(env: Env) {
     if (!p) return c.json({ error: 'site required' }, 400)
     const rows = await db.getPagePerf(p.site, c.req.query('url'))
     return c.json({ rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  // ── Audience: traffic / geo / devices ──────────────────────────────────────
+  const fromParam = (c: { req: { query: (k: string) => string | undefined } }) => {
+    const raw = c.req.query('from')
+    return raw ? parseInt(raw) : undefined
+  }
+
+  app.get('/traffic', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getTrafficSources(p.site, fromParam(c))
+    return c.json({ sources: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/geo', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getGeoStats(p.site)
+    return c.json({ geo: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/devices', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getDeviceStats(p.site)
+    return c.json({ devices: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/conversions', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getConversions(p.site, fromParam(c))
+    return c.json({ conversions: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  // ── Overview + health score ─────────────────────────────────────────────────
+  app.get('/overview', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const [summary, sites] = await Promise.all([
+      db.getOverview(p.site, fromParam(c)),
+      db.getSiteTotals(),
+    ])
+    return c.json({ summary, sites })
   })
 
   // ── Alert rules ───────────────────────────────────────────────────────────
