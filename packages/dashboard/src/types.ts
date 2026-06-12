@@ -172,3 +172,7 @@ export interface OverviewSummary {
 }
 
 export interface SiteTotal { site: string; sessions: number; lastSeen: number }
+
+export interface FunnelStep { label: string; type: 'url' | 'event'; match: string }
+export interface FunnelDef { id: string; site: string; name: string; steps: FunnelStep[]; updated: number }
+export interface FunnelResult { counts: number[]; total: number; steps: FunnelStep[] }

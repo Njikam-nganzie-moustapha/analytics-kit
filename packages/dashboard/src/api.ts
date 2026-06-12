@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult } from './types'
 
 const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const TOKEN_KEY = 'analyticskit_token'
@@ -308,6 +308,37 @@ export async function fetchOverview(site: string, from?: number): Promise<{ summ
   const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
   const res = await apiFetch(`${BASE}/overview?${q}`, { headers: hdrs() })
   return await res.json() as { summary: OverviewSummary; sites: SiteTotal[] }
+}
+
+// ── Funnels ─────────────────────────────────────────────────────────────────────
+
+export async function fetchFunnels(site: string): Promise<FunnelDef[]> {
+  const res = await apiFetch(`${BASE}/funnels?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { funnels: FunnelDef[] }).funnels ?? []
+}
+
+export async function saveFunnel(site: string, name: string, steps: FunnelStep[], id?: string): Promise<string> {
+  const path = id ? `/funnels/${encodeURIComponent(id)}` : '/funnels'
+  const res = await apiFetch(`${BASE}${path}?site=${encodeURIComponent(site)}`, {
+    method: id ? 'PUT' : 'POST',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ name, steps }),
+  })
+  return (await res.json() as { id: string }).id
+}
+
+export async function deleteFunnel(site: string, id: string): Promise<void> {
+  await apiFetch(`${BASE}/funnels/${encodeURIComponent(id)}?site=${encodeURIComponent(site)}`, { method: 'DELETE', headers: hdrs() })
+}
+
+export async function computeFunnel(site: string, steps: FunnelStep[], from?: number): Promise<FunnelResult> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/funnels/compute?${q}`, {
+    method: 'POST',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ steps }),
+  })
+  return await res.json() as FunnelResult
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────

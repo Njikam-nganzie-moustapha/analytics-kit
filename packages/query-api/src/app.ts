@@ -11,7 +11,7 @@ import { cronRouter       } from './routes/cron'
 import { vitalsRouter     } from './routes/vitals'
 import { sourcemapsRouter } from './routes/sourcemaps'
 import { sitesRouter      } from './routes/sites'
-import { parseSite } from './validate'
+import { parseSite, parseSteps } from './validate'
 import type { QueryTurso } from './turso'
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -85,6 +85,38 @@ export function createApp(db: QueryTurso) {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
     const [summary, sites] = await Promise.all([db.getOverview(p.site, fromOf(c)), db.getSiteTotals()])
     return c.json({ summary, sites })
+  })
+
+  // Funnels (inline — mirror worker.ts)
+  app.get('/funnels', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ funnels: await db.listFunnels(p.site) })
+  })
+  app.post('/funnels', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ name?: string; steps?: unknown }>().catch(() => ({} as { name?: string; steps?: unknown }))
+    const steps = parseSteps(body.steps); if (!steps) return c.json({ error: 'steps must be 2–8 {type,label,match}' }, 400)
+    const id = Date.now().toString(36)
+    await db.upsertFunnel(p.site, id, body.name || 'Untitled funnel', steps)
+    return c.json({ ok: true, id })
+  })
+  app.put('/funnels/:id', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ name?: string; steps?: unknown }>().catch(() => ({} as { name?: string; steps?: unknown }))
+    const steps = parseSteps(body.steps); if (!steps) return c.json({ error: 'steps must be 2–8 {type,label,match}' }, 400)
+    await db.upsertFunnel(p.site, c.req.param('id'), body.name || 'Untitled funnel', steps)
+    return c.json({ ok: true, id: c.req.param('id') })
+  })
+  app.delete('/funnels/:id', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    await db.deleteFunnel(p.site, c.req.param('id'))
+    return c.json({ ok: true })
+  })
+  app.post('/funnels/compute', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ steps?: unknown }>().catch(() => ({} as { steps?: unknown }))
+    const steps = parseSteps(body.steps); if (!steps) return c.json({ error: 'steps must be 2–8 {type,label,match}' }, 400)
+    return c.json({ ...(await db.computeFunnel(p.site, steps, fromOf(c))), steps })
   })
 
   return app

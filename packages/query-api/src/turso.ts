@@ -206,6 +206,10 @@ export interface OverviewSummary {
 
 export interface SiteTotal { site: string; sessions: number; lastSeen: number }
 
+export interface FunnelStep { label: string; type: 'url' | 'event'; match: string }
+export interface FunnelDef { id: string; site: string; name: string; steps: FunnelStep[]; updated: number }
+export interface FunnelResult { counts: number[]; total: number }
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class QueryTurso {
@@ -816,6 +820,69 @@ export class QueryTurso {
     }
   }
 
+  // ── Funnels ────────────────────────────────────────────────────────────────────
+
+  async listFunnels(site: string): Promise<FunnelDef[]> {
+    const rows = await this._query(
+      `SELECT id, site, name, steps, updated FROM funnel_defs WHERE site = ? ORDER BY updated DESC`,
+      [str(site)],
+    )
+    return rows.flatMap(r => {
+      try {
+        return [{ id: r.id!, site: r.site!, name: r.name!, steps: JSON.parse(r.steps ?? '[]') as FunnelStep[], updated: parseInt(r.updated ?? '0') }]
+      } catch { return [] }
+    })
+  }
+
+  async upsertFunnel(site: string, id: string, name: string, steps: FunnelStep[]): Promise<void> {
+    await this._execute(
+      `INSERT INTO funnel_defs (id, site, name, steps, updated) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (site, id) DO UPDATE SET name = excluded.name, steps = excluded.steps, updated = excluded.updated`,
+      [str(id), str(site), str(name.slice(0, 80)), str(JSON.stringify(steps)), int(Date.now())],
+    )
+  }
+
+  async deleteFunnel(site: string, id: string): Promise<void> {
+    await this._execute('DELETE FROM funnel_defs WHERE site = ? AND id = ?', [str(site), str(id)])
+  }
+
+  // Sequential funnel: counts[i] = sessions that completed steps 0..i in order.
+  // Computed on demand by scanning the session event stream (capped).
+  async computeFunnel(site: string, steps: FunnelStep[], from?: number): Promise<FunnelResult> {
+    const counts = new Array(steps.length).fill(0)
+    if (steps.length === 0) return { counts, total: 0 }
+    const rows = await this._query(
+      `SELECT sid, t, type, payload FROM analytics_events WHERE site = ? AND t >= ? ORDER BY sid ASC, t ASC LIMIT 100000`,
+      [str(site), int(from ?? 0)],
+    )
+    const sids = new Set<string>()
+    let curSid = ''
+    let ptr = 0
+    const flush = () => { for (let i = 0; i < ptr; i++) counts[i]++ }
+    for (const r of rows) {
+      const sid = r.sid ?? ''
+      if (sid !== curSid) { if (curSid) flush(); curSid = sid; ptr = 0; sids.add(sid) }
+      if (ptr >= steps.length) continue
+      let url = '', name = ''
+      if (r.payload) {
+        try {
+          const p = JSON.parse(r.payload) as Record<string, unknown>
+          const inner = (typeof p.payload === 'object' && p.payload ? p.payload : p) as Record<string, unknown>
+          url = String(p.url ?? inner.url ?? '')
+          name = String(p.name ?? inner.name ?? '')
+        } catch { /* skip */ }
+      }
+      const step = steps[ptr]
+      const m = step.match.toLowerCase()
+      const hit = step.type === 'url'
+        ? url.toLowerCase().includes(m)
+        : String(r.type ?? '').toLowerCase() === 'custom' && name.toLowerCase().includes(m)
+      if (hit) ptr++
+    }
+    if (curSid) flush()
+    return { counts, total: sids.size }
+  }
+
   async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
     const sql = `SELECT payload
                  FROM analytics_events
@@ -1034,6 +1101,14 @@ export class QueryTurso {
           site TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL DEFAULT '',
           count INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (site, kind, url)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS funnel_defs (
+          id      TEXT NOT NULL,
+          site    TEXT NOT NULL,
+          name    TEXT NOT NULL,
+          steps   TEXT NOT NULL,
+          updated INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, id)
         )` }},
       { type: 'close' },
     ])

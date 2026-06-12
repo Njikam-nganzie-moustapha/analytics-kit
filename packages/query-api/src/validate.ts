@@ -20,3 +20,24 @@ export function parseFilename(raw: string | undefined): { filename: string } | n
   if (!raw || !FILENAME_RE.test(raw) || raw.includes('..')) return null
   return { filename: raw }
 }
+
+export interface FunnelStepInput { label: string; type: 'url' | 'event'; match: string }
+
+// Validates a funnel definition: 2–8 ordered steps, each matching a URL
+// substring or a custom event name.
+export function parseSteps(raw: unknown): FunnelStepInput[] | null {
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 8) return null
+  const out: FunnelStepInput[] = []
+  for (const s of raw) {
+    if (!s || typeof s !== 'object') return null
+    const o = s as Record<string, unknown>
+    const match = typeof o.match === 'string' ? o.match.slice(0, 120).trim() : ''
+    if (!match) return null
+    out.push({
+      type: o.type === 'event' ? 'event' : 'url',
+      label: (typeof o.label === 'string' && o.label.trim() ? o.label : match).slice(0, 60),
+      match,
+    })
+  }
+  return out
+}
