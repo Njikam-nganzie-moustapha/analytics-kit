@@ -5,10 +5,15 @@ const TOKEN_KEY = 'analyticskit_token'
 // Legacy fallback only — prefer password→token login. VITE_API_KEY ships the
 // key in the bundle, so it should be removed from the deploy once a
 // DASHBOARD_PASSWORD is configured on the query-api.
-const PRESET_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? ''
+// Strip BOM, surrounding whitespace, and any non-Latin1 codepoints. A stray
+// U+FEFF (BOM) from a UTF-8-BOM paste into the env var otherwise makes fetch()
+// throw "String contains non ISO-8859-1 code point" when building the header,
+// killing every authenticated request. See project memory "vite-api-key-bom".
+const cleanKey = (s: string) => s.trim().replace(/[^\x20-\xFF]/g, '')
+const PRESET_KEY = cleanKey((import.meta.env.VITE_API_KEY as string | undefined) ?? '')
 
-export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) || PRESET_KEY }
-export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t) }
+export function getToken(): string  { return cleanKey(localStorage.getItem(TOKEN_KEY) || PRESET_KEY) }
+export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, cleanKey(t)) }
 export function clearToken()        { localStorage.removeItem(TOKEN_KEY) }
 
 function hdrs(extra?: Record<string, string>): HeadersInit {
