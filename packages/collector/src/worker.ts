@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { MiddlewareHandler } from 'hono'
 import { TursoAdapter } from '../../storage/src/turso'
-import type { AnalyticsEvent } from '../../storage/src/types'
+import type { AnalyticsEvent, GeoInfo } from '../../storage/src/types'
 
 interface Env {
   TURSO_URL:    string
@@ -71,6 +72,18 @@ function isFiltered(e: AnalyticsEvent): boolean {
 
 const app = new Hono<{ Bindings: Env }>()
 
+const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Cross-Origin-Resource-Policy', 'cross-origin')
+  c.header('Cache-Control', 'no-store')
+  c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+}
+
+app.use('*', securityHeaders)
+
 app.use('*', async (c, next) => {
   const origins = c.env.CORS_ORIGINS?.split(',').map(s => s.trim()) ?? ['*']
   return cors({
@@ -80,6 +93,17 @@ app.use('*', async (c, next) => {
     maxAge: 86400,
   })(c, next)
 })
+
+// Geo from the Cloudflare edge — country/city/region only, never the raw IP
+// (keeps the GDPR-friendly posture). Attached to each event's payload so the
+// processor can aggregate audience geography without any IP storage.
+function edgeGeo(c: { req: { raw: Request } }): GeoInfo | undefined {
+  const cf = (c.req.raw as Request & { cf?: Record<string, unknown> }).cf
+  if (!cf) return undefined
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  const geo: GeoInfo = { country: str(cf.country), city: str(cf.city), region: str(cf.region) }
+  return geo.country || geo.city || geo.region ? geo : undefined
+}
 
 app.get('/health', c => c.json({ ok: true, ts: Date.now() }))
 
@@ -111,6 +135,9 @@ app.post('/e', async c => {
       })
 
     if (events.length === 0) return c.body(null, 204)
+
+    const geo = edgeGeo(c)
+    if (geo) for (const e of events) { if (!e.geo) e.geo = geo }
 
     const storage = new TursoAdapter({ url: c.env.TURSO_URL, token: c.env.TURSO_TOKEN })
     await storage.write(events)

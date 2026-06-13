@@ -141,3 +141,46 @@ export interface FeedbackItem {
   url:     string | null
   ts:      number
 }
+
+// ── Audience + overview ─────────────────────────────────────────────────────────
+
+export type Channel = 'direct' | 'organic' | 'social' | 'referral' | 'ai'
+
+export interface TrafficSource {
+  site: string; channel: Channel; referrerHost: string
+  utmSource: string; utmMedium: string; utmCampaign: string
+  sessions: number; lastSeen: number
+}
+
+export interface GeoStat { site: string; country: string; city: string; sessions: number }
+
+export interface DeviceStat { site: string; deviceType: string; browser: string; os: string; sessions: number }
+
+export interface ConversionStat { site: string; kind: string; url: string; count: number; lastSeen: number }
+
+export interface OverviewSummary {
+  site: string
+  sessions: number
+  users: number
+  errorSessions: number
+  errorRate: number
+  conversions: number
+  vitalsGoodPct: number
+  perfP75: number
+  health: number
+  series: { day: number; sessions: number; errors: number }[]
+}
+
+export interface SiteTotal { site: string; sessions: number; lastSeen: number }
+
+export interface FunnelStep { label: string; type: 'url' | 'event'; match: string }
+export interface FunnelDef { id: string; site: string; name: string; steps: FunnelStep[]; updated: number }
+export interface FunnelResult { counts: number[]; total: number; steps: FunnelStep[] }
+
+export interface SeoCheck { id: string; label: string; status: 'pass' | 'warn' | 'fail'; detail: string; fix?: string; weight: number }
+export interface SeoReport { url: string; score: number; title: string | null; description: string | null; checks: SeoCheck[] }
+
+export interface PsMetric { id: string; label: string; display: string; numeric: number | null }
+export interface PageSpeedResult { url: string; strategy: string; score: number; metrics: PsMetric[] }
+
+export interface Branding { site: string; productName: string | null; logoUrl: string | null; primary: string | null; updated: number }

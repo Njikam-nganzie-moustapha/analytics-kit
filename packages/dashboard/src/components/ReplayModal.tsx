@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Replayer } from 'rrweb'
 
 interface Props {
   sid: string
@@ -66,30 +65,32 @@ export function ReplayModal({ sid, events, loading = false, onClose }: Props) {
     container.style.height       = `${Math.round(iH * scale)}px`
   }, [])
 
-  // Init replayer when events arrive
+  // Init replayer when events arrive — rrweb is dynamically imported so its
+  // ~190KB chunk only loads when a replay is actually opened.
   useEffect(() => {
     if (events.length === 0 || !containerRef.current) return
     let cancelled = false
+    let r: ReplayerLike | null = null
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r = new Replayer(events as any, {
-      root:      containerRef.current,
-      speed:     1,
-      mouseTail: false,
-    }) as ReplayerLike
+    import('rrweb').then(({ Replayer }) => {
+      if (cancelled || !containerRef.current) return
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      r = new Replayer(events as any, {
+        root:      containerRef.current,
+        speed:     1,
+        mouseTail: false,
+      }) as ReplayerLike
 
-    if (cancelled) { r.pause(); return }
+      replayerRef.current = r
+      const meta = r.getMetaData()
+      setTotal(meta.totalTime)
+      setReady(true)
 
-    replayerRef.current = r
-    const meta = r.getMetaData()
-    setTotal(meta.totalTime)
-    setReady(true)
+      r.on('finish', () => { stopTimer(); setPlaying(false); setCurrent(meta.totalTime) })
+      setTimeout(scaleIframe, 80)
+    })
 
-    r.on('finish', () => { stopTimer(); setPlaying(false); setCurrent(meta.totalTime) })
-
-    setTimeout(scaleIframe, 80)
-
-    return () => { cancelled = true; stopTimer(); r.pause() }
+    return () => { cancelled = true; stopTimer(); r?.pause() }
   }, [events, scaleIframe, stopTimer])
 
   useEffect(() => {

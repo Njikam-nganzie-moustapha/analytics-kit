@@ -1,32 +1,126 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fira+Sans:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
 
-/* ── Tokens ─────────────────────────────────────────────────────────────────── */
-:root {
-  --bg:           #080b12;
-  --surface:      #0d1017;
-  --surface-2:    #131720;
-  --surface-3:    #1a1f2c;
-  --border:       #1c2030;
-  --border-2:     #252a3a;
-  --text:         #dce4f0;
-  --text-2:       #8892a8;
-  --text-muted:   #4a5268;
-  --accent:       #6366f1;
-  --accent-2:     #818cf8;
-  --accent-dim:   rgba(99,102,241,.12);
-  --accent-glow:  rgba(99,102,241,.28);
-  --success:      #22c55e;
-  --success-2:    #4ade80;
-  --success-dim:  rgba(34,197,94,.12);
-  --error:        #f87171;
-  --error-2:      #fca5a5;
-  --error-dim:    rgba(248,113,113,.10);
-  --warn:         #fb923c;
-  --warn-dim:     rgba(251,146,60,.12);
-  --radius:       8px;
-  --radius-lg:    12px;
-  --shadow:       0 1px 3px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.3);
-  --shadow-lg:    0 8px 40px rgba(0,0,0,.6), 0 24px 80px rgba(0,0,0,.4);
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens (shadcn semantic + legacy, themed) ───────────────────────── */
+@layer base {
+  :root {
+    /* shadcn semantic — LIGHT */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 226 71% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 40%;
+    --ui-accent: 210 40% 94%;
+    --ui-accent-foreground: 222 47% 11%;
+    --brand-amber: 32 95% 44%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 64% 32%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 40%;
+    --warning-foreground: 0 0% 100%;
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 226 71% 40%;
+    --radius: 0.6rem;
+    --sidebar: 210 40% 98%;
+    --sidebar-foreground: 222 30% 25%;
+    --sidebar-border: 214 32% 88%;
+    --sidebar-accent: 210 40% 94%;
+
+    /* legacy vars — LIGHT (so un-migrated tabs theme correctly) */
+    --bg:          #f5f8fc;
+    --surface:     #ffffff;
+    --surface-2:   #f1f5f9;
+    --surface-3:   #e7edf5;
+    --border-2:    #cbd5e1;
+    --text:        #0f172a;
+    --text-2:      #475569;
+    --text-muted:  #94a3b8;
+    --accent:      #1e40af;
+    --accent-2:    #2563eb;
+    --success:     #16a34a;
+    --accent-dim:  rgba(30,64,175,.08);
+    --accent-glow: rgba(30,64,175,.22);
+    --success-2:   #16a34a;
+    --success-dim: rgba(22,163,74,.10);
+    --error:       #dc2626;
+    --error-2:     #ef4444;
+    --error-dim:   rgba(220,38,38,.08);
+    --warn:        #d97706;
+    --warn-dim:    rgba(217,119,6,.10);
+    --radius-lg:   12px;
+    --shadow:      0 1px 2px rgba(15,23,42,.06), 0 4px 16px rgba(15,23,42,.06);
+    --shadow-lg:   0 8px 40px rgba(15,23,42,.12), 0 24px 80px rgba(15,23,42,.10);
+  }
+
+  .dark {
+    /* shadcn semantic — DARK */
+    --background: 222 44% 6%;
+    --foreground: 214 32% 90%;
+    --card: 220 30% 8%;
+    --card-foreground: 214 32% 90%;
+    --popover: 220 30% 8%;
+    --popover-foreground: 214 32% 90%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 220 25% 13%;
+    --secondary-foreground: 214 32% 90%;
+    --muted: 220 25% 13%;
+    --muted-foreground: 218 14% 62%;
+    --ui-accent: 220 26% 14%;
+    --ui-accent-foreground: 214 32% 90%;
+    --brand-amber: 38 92% 50%;
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 222 47% 11%;
+    --warning: 32 95% 55%;
+    --warning-foreground: 222 47% 11%;
+    --border: 220 22% 16%;
+    --input: 220 22% 16%;
+    --ring: 217 91% 60%;
+    --sidebar: 220 32% 7%;
+    --sidebar-foreground: 214 20% 70%;
+    --sidebar-border: 220 22% 14%;
+    --sidebar-accent: 220 26% 12%;
+
+    /* legacy vars — DARK (original palette) */
+    --bg:          #080b12;
+    --surface:     #0d1017;
+    --surface-2:   #131720;
+    --surface-3:   #1a1f2c;
+    --border-2:    #252a3a;
+    --text:        #dce4f0;
+    --text-2:      #8892a8;
+    --text-muted:  #4a5268;
+    --accent:      #6366f1;
+    --accent-2:    #818cf8;
+    --success:     #22c55e;
+    --accent-dim:  rgba(99,102,241,.12);
+    --accent-glow: rgba(99,102,241,.28);
+    --success-2:   #4ade80;
+    --success-dim: rgba(34,197,94,.12);
+    --error:       #f87171;
+    --error-2:     #fca5a5;
+    --error-dim:   rgba(248,113,113,.10);
+    --warn:        #fb923c;
+    --warn-dim:    rgba(251,146,60,.12);
+    --shadow:      0 1px 3px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.3);
+    --shadow-lg:   0 8px 40px rgba(0,0,0,.6), 0 24px 80px rgba(0,0,0,.4);
+  }
+
+  * { border-color: hsl(var(--border)); }
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────────── */
@@ -35,7 +129,7 @@
 html { height: 100%; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Fira Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
@@ -44,6 +138,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* tabular figures for data columns */
+.tabular, td, th, .mono { font-variant-numeric: tabular-nums; }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar             { width: 5px; height: 5px; }
@@ -1578,3 +1675,25 @@ tbody tr:hover td { background: var(--surface-2); }
   cursor: pointer;
 }
 
+
+/* ── Auto-refresh controls ──────────────────────────────────────────────────── */
+.input-refresh {
+  width: 148px;
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 5px 24px 5px 10px;
+  color: var(--text-2);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%238892a8' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+}
+.refresh-ts {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}

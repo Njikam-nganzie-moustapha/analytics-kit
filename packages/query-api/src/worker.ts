@@ -1,7 +1,12 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { MiddlewareHandler } from 'hono'
 import { QueryTurso } from './turso'
-import { parseSite, parseRelease, parseFilename } from './validate'
+import { parseSite, parseRelease, parseFilename, parseSteps, parseAuditUrl } from './validate'
+import { signToken, verifyToken } from './token'
+import { auditHtml } from './seo'
+
+const HSL_RE = /^\d{1,3} \d{1,3}% \d{1,3}%$/
 
 interface Env {
   TURSO_URL:          string
@@ -9,18 +14,40 @@ interface Env {
   QUERY_API_KEY:      string
   DASHBOARD_PASSWORD?: string
   CORS_ORIGINS?:      string
+  ALLOW_QUERY_KEY?:   string // set to '1' to also accept ?api_key= (legacy); default header-only
+  PAGESPEED_API_KEY?: string // optional Google PageSpeed Insights key (higher quota)
+}
+
+const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '1; mode=block')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Cross-Origin-Resource-Policy', 'same-site')
+  c.header('Cache-Control', 'no-store')
+  c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+  // API returns JSON only — disallow rendering as a page
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
 }
 
 const VALID_STATUSES = new Set(['open', 'ignored', 'resolved', 'regressed'])
 
 // Per-isolate schema init flag
 let schemaReady = false
+let warnedCors = false
 
 function makeApp(env: Env) {
   const db  = new QueryTurso(env.TURSO_URL, env.TURSO_TOKEN)
   const app = new Hono()
 
+  app.use('*', securityHeaders)
+
   const origins = env.CORS_ORIGINS?.split(',').map(s => s.trim()) ?? ['*']
+  if (origins.length === 1 && origins[0] === '*' && !warnedCors) {
+    warnedCors = true
+    console.warn('[query-api] CORS_ORIGINS not set — wildcard CORS active. Set it to the dashboard origin in production.')
+  }
   app.use('*', cors({
     origin: origins.length === 1 && origins[0] === '*' ? '*' : origins,
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -48,16 +75,24 @@ function makeApp(env: Env) {
     if (!env.DASHBOARD_PASSWORD || !env.QUERY_API_KEY) return c.json({ token: null, required: false })
     const body = await c.req.json<{ password?: string }>().catch(() => ({} as { password?: string }))
     if (body.password !== env.DASHBOARD_PASSWORD) return c.json({ error: 'invalid password' }, 401)
-    return c.json({ token: env.QUERY_API_KEY, required: true })
+    // Hand back a short-lived signed token — never the static QUERY_API_KEY.
+    const { token, exp } = await signToken(env.QUERY_API_KEY)
+    return c.json({ token, exp, required: true })
   })
 
-  // API key guard for all data routes
+  // Auth guard for all data routes. Accepts the static key (server-to-server)
+  // or an unexpired signed session token. Header-only by default — query-string
+  // keys leak via logs/proxies/referrer; set ALLOW_QUERY_KEY=1 to opt back in.
   app.use('*', async (c, next) => {
     if (!env.QUERY_API_KEY) return next()
-    const provided  = (c.req.header('x-api-key') ?? c.req.query('api_key') ?? '').trim()
-    const expected  = env.QUERY_API_KEY.trim()
-    if (provided !== expected) return c.json({ error: 'unauthorized' }, 401)
-    return next()
+    const expected = env.QUERY_API_KEY.trim()
+    const headerKey = (c.req.header('x-api-key') ?? '').trim()
+    const queryKey = env.ALLOW_QUERY_KEY === '1' ? (c.req.query('api_key') ?? '').trim() : ''
+    const provided = headerKey || queryKey
+    if (!provided) return c.json({ error: 'unauthorized' }, 401)
+    if (provided === expected) return next()
+    if (await verifyToken(provided, expected)) return next()
+    return c.json({ error: 'unauthorized' }, 401)
   })
 
   // ── Heatmap ───────────────────────────────────────────────────────────────
@@ -156,6 +191,174 @@ function makeApp(env: Env) {
     if (!p) return c.json({ error: 'site required' }, 400)
     const rows = await db.getPagePerf(p.site, c.req.query('url'))
     return c.json({ rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  // ── Audience: traffic / geo / devices ──────────────────────────────────────
+  const fromParam = (c: { req: { query: (k: string) => string | undefined } }) => {
+    const raw = c.req.query('from')
+    return raw ? parseInt(raw) : undefined
+  }
+
+  app.get('/traffic', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getTrafficSources(p.site, fromParam(c))
+    return c.json({ sources: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/geo', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getGeoStats(p.site)
+    return c.json({ geo: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/devices', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getDeviceStats(p.site)
+    return c.json({ devices: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/conversions', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getConversions(p.site, fromParam(c))
+    return c.json({ conversions: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  // ── Overview + health score ─────────────────────────────────────────────────
+  app.get('/overview', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const [summary, sites] = await Promise.all([
+      db.getOverview(p.site, fromParam(c)),
+      db.getSiteTotals(),
+    ])
+    return c.json({ summary, sites })
+  })
+
+  // ── Funnels ─────────────────────────────────────────────────────────────────
+  app.get('/funnels', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ funnels: await db.listFunnels(p.site) })
+  })
+
+  app.post('/funnels', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ name?: string; steps?: unknown }>().catch(() => ({} as { name?: string; steps?: unknown }))
+    const steps = parseSteps(body.steps)
+    if (!steps) return c.json({ error: 'steps must be an array of 2–8 {type,label,match}' }, 400)
+    const id = Date.now().toString(36)
+    await db.upsertFunnel(p.site, id, body.name || 'Untitled funnel', steps)
+    return c.json({ ok: true, id })
+  })
+
+  app.put('/funnels/:id', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const id = c.req.param('id')
+    const body = await c.req.json<{ name?: string; steps?: unknown }>().catch(() => ({} as { name?: string; steps?: unknown }))
+    const steps = parseSteps(body.steps)
+    if (!steps) return c.json({ error: 'steps must be an array of 2–8 {type,label,match}' }, 400)
+    await db.upsertFunnel(p.site, id, body.name || 'Untitled funnel', steps)
+    return c.json({ ok: true, id })
+  })
+
+  app.delete('/funnels/:id', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    await db.deleteFunnel(p.site, c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  app.post('/funnels/compute', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ steps?: unknown }>().catch(() => ({} as { steps?: unknown }))
+    const steps = parseSteps(body.steps)
+    if (!steps) return c.json({ error: 'steps must be an array of 2–8 {type,label,match}' }, 400)
+    const result = await db.computeFunnel(p.site, steps, fromParam(c))
+    return c.json({ ...result, steps })
+  })
+
+  // ── SEO audit ───────────────────────────────────────────────────────────────
+  app.get('/seo', async c => {
+    const target = parseAuditUrl(c.req.query('url'))
+    if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
+    try {
+      const resp = await fetch(target.url, {
+        headers: { 'user-agent': 'analytics-kit-seo/1.0 (+https://analytics-kit)' },
+        redirect: 'follow',
+      })
+      if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
+      const html = (await resp.text()).slice(0, 1_500_000)
+      return c.json(auditHtml(html, resp.url || target.url))
+    } catch (e) {
+      return c.json({ error: `could not fetch page: ${e instanceof Error ? e.message : String(e)}` }, 502)
+    }
+  })
+
+  // ── PageSpeed (Google PSI lab data) ───────────────────────────────────────────
+  app.get('/pagespeed', async c => {
+    const target = parseAuditUrl(c.req.query('url'))
+    if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
+    const strategy = c.req.query('strategy') === 'desktop' ? 'desktop' : 'mobile'
+    const key = env.PAGESPEED_API_KEY ? `&key=${env.PAGESPEED_API_KEY}` : ''
+    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&category=performance${key}`
+    try {
+      const r = await fetch(psi)
+      const data = await r.json() as { lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, { displayValue?: string; numericValue?: number }> }; error?: { message?: string } }
+      if (data.error) return c.json({ error: data.error.message ?? 'PageSpeed error' }, 502)
+      const lr = data.lighthouseResult
+      const score = Math.round((lr?.categories?.performance?.score ?? 0) * 100)
+      const pick = (id: string, label: string) => {
+        const a = lr?.audits?.[id]
+        return { id, label, display: a?.displayValue ?? '—', numeric: a?.numericValue ?? null }
+      }
+      const metrics = [
+        pick('first-contentful-paint', 'First Contentful Paint'),
+        pick('largest-contentful-paint', 'Largest Contentful Paint'),
+        pick('total-blocking-time', 'Total Blocking Time'),
+        pick('cumulative-layout-shift', 'Cumulative Layout Shift'),
+        pick('speed-index', 'Speed Index'),
+        pick('interactive', 'Time to Interactive'),
+      ]
+      return c.json({ url: target.url, strategy, score, metrics })
+    } catch (e) {
+      return c.json({ error: `PageSpeed request failed: ${e instanceof Error ? e.message : String(e)}` }, 502)
+    }
+  })
+
+  // ── Branding (white-label) ────────────────────────────────────────────────────
+  app.get('/branding', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const branding = await db.getBranding(p.site)
+    return c.json({ branding })
+  })
+
+  app.put('/branding', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const body = await c.req.json<{ product_name?: string | null; logo_url?: string | null; primary?: string | null }>().catch(() => ({} as Record<string, unknown>))
+    const update: { productName?: string | null; logoUrl?: string | null; primary?: string | null } = {}
+    if ('product_name' in body) update.productName = body.product_name ? String(body.product_name).slice(0, 60) : null
+    if ('logo_url' in body) {
+      const lu = body.logo_url ? String(body.logo_url).slice(0, 500) : null
+      if (lu && !/^https?:\/\//i.test(lu)) return c.json({ error: 'logo_url must be http(s)' }, 400)
+      update.logoUrl = lu
+    }
+    if ('primary' in body) {
+      const pr = body.primary ? String(body.primary).trim() : null
+      if (pr && !HSL_RE.test(pr)) return c.json({ error: 'primary must be an HSL triple like "262 83% 58%"' }, 400)
+      update.primary = pr
+    }
+    if (Object.keys(update).length === 0) return c.json({ error: 'no fields to update' }, 400)
+    await db.upsertBranding(p.site, update)
+    return c.json({ ok: true })
   })
 
   // ── Alert rules ───────────────────────────────────────────────────────────

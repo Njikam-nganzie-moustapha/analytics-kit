@@ -12,3 +12,4 @@ bun.lockb
 # Wrangler build output
 packages/*/tmp/
 packages/*/.wrangler/
+*.tsbuildinfo

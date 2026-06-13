@@ -1,12 +1,19 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding } from './types'
 
-const BASE       = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
-const PRESET_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? ''
-const TOKEN_KEY  = 'analyticskit_token'
+const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
+const TOKEN_KEY = 'analyticskit_token'
+// Legacy fallback only — prefer password→token login. VITE_API_KEY ships the
+// key in the bundle, so it should be removed from the deploy once a
+// DASHBOARD_PASSWORD is configured on the query-api.
+// Strip BOM, surrounding whitespace, and any non-Latin1 codepoints. A stray
+// U+FEFF (BOM) from a UTF-8-BOM paste into the env var otherwise makes fetch()
+// throw "String contains non ISO-8859-1 code point" when building the header,
+// killing every authenticated request. See project memory "vite-api-key-bom".
+const cleanKey = (s: string) => s.trim().replace(/[^\x20-\xFF]/g, '')
+const PRESET_KEY = cleanKey((import.meta.env.VITE_API_KEY as string | undefined) ?? '')
 
-// Use stored login token first, fall back to the pre-configured VITE_API_KEY
-export function getToken(): string  { return localStorage.getItem(TOKEN_KEY) || PRESET_KEY }
-export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t) }
+export function getToken(): string  { return cleanKey(localStorage.getItem(TOKEN_KEY) || PRESET_KEY) }
+export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, cleanKey(t)) }
 export function clearToken()        { localStorage.removeItem(TOKEN_KEY) }
 
 function hdrs(extra?: Record<string, string>): HeadersInit {
@@ -276,6 +283,99 @@ export async function uploadSourceMap(
 export async function deleteSourceMap(site: string, release: string, filename: string): Promise<void> {
   const q = new URLSearchParams({ site, release, filename })
   await apiFetch(`${BASE}/sourcemaps?${q}`, { method: 'DELETE', headers: hdrs() })
+}
+
+// ── Audience + overview ─────────────────────────────────────────────────────────
+
+export async function fetchTraffic(site: string, from?: number): Promise<TrafficSource[]> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/traffic?${q}`, { headers: hdrs() })
+  return (await res.json() as { sources: TrafficSource[] }).sources ?? []
+}
+
+export async function fetchGeo(site: string): Promise<GeoStat[]> {
+  const res = await apiFetch(`${BASE}/geo?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { geo: GeoStat[] }).geo ?? []
+}
+
+export async function fetchDevices(site: string): Promise<DeviceStat[]> {
+  const res = await apiFetch(`${BASE}/devices?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { devices: DeviceStat[] }).devices ?? []
+}
+
+export async function fetchConversions(site: string, from?: number): Promise<ConversionStat[]> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/conversions?${q}`, { headers: hdrs() })
+  return (await res.json() as { conversions: ConversionStat[] }).conversions ?? []
+}
+
+export async function fetchOverview(site: string, from?: number): Promise<{ summary: OverviewSummary; sites: SiteTotal[] }> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/overview?${q}`, { headers: hdrs() })
+  return await res.json() as { summary: OverviewSummary; sites: SiteTotal[] }
+}
+
+// ── Funnels ─────────────────────────────────────────────────────────────────────
+
+export async function fetchFunnels(site: string): Promise<FunnelDef[]> {
+  const res = await apiFetch(`${BASE}/funnels?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { funnels: FunnelDef[] }).funnels ?? []
+}
+
+export async function saveFunnel(site: string, name: string, steps: FunnelStep[], id?: string): Promise<string> {
+  const path = id ? `/funnels/${encodeURIComponent(id)}` : '/funnels'
+  const res = await apiFetch(`${BASE}${path}?site=${encodeURIComponent(site)}`, {
+    method: id ? 'PUT' : 'POST',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ name, steps }),
+  })
+  return (await res.json() as { id: string }).id
+}
+
+export async function deleteFunnel(site: string, id: string): Promise<void> {
+  await apiFetch(`${BASE}/funnels/${encodeURIComponent(id)}?site=${encodeURIComponent(site)}`, { method: 'DELETE', headers: hdrs() })
+}
+
+export async function computeFunnel(site: string, steps: FunnelStep[], from?: number): Promise<FunnelResult> {
+  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+  const res = await apiFetch(`${BASE}/funnels/compute?${q}`, {
+    method: 'POST',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ steps }),
+  })
+  return await res.json() as FunnelResult
+}
+
+// ── SEO audit / PageSpeed / Branding ─────────────────────────────────────────────
+
+async function jsonOrThrow<T>(res: Response): Promise<T> {
+  const data = await res.json() as T & { error?: string }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}
+
+export async function fetchSeo(url: string): Promise<SeoReport> {
+  const res = await apiFetch(`${BASE}/seo?url=${encodeURIComponent(url)}`, { headers: hdrs() })
+  return jsonOrThrow<SeoReport>(res)
+}
+
+export async function fetchPageSpeed(url: string, strategy: 'mobile' | 'desktop'): Promise<PageSpeedResult> {
+  const res = await apiFetch(`${BASE}/pagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}`, { headers: hdrs() })
+  return jsonOrThrow<PageSpeedResult>(res)
+}
+
+export async function fetchBranding(site: string): Promise<Branding | null> {
+  const res = await apiFetch(`${BASE}/branding?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { branding: Branding | null }).branding
+}
+
+export async function saveBranding(site: string, body: { product_name?: string | null; logo_url?: string | null; primary?: string | null }): Promise<void> {
+  const res = await apiFetch(`${BASE}/branding?site=${encodeURIComponent(site)}`, {
+    method: 'PUT',
+    headers: hdrs({ 'content-type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  await jsonOrThrow(res)
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────

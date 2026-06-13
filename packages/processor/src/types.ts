@@ -93,3 +93,40 @@ export interface Checkpoint {
   site: string
   lastT: number
 }
+
+export type Channel = 'direct' | 'organic' | 'social' | 'referral' | 'ai'
+
+export interface TrafficRow {
+  site: string
+  channel: Channel
+  referrerHost: string
+  utmSource: string
+  utmMedium: string
+  utmCampaign: string
+  sessions: number
+  lastSeen: number
+}
+
+export interface GeoRow {
+  site: string
+  country: string
+  city: string
+  sessions: number
+  lastSeen: number
+}
+
+export interface DeviceRow {
+  site: string
+  deviceType: string
+  browser: string
+  os: string
+  sessions: number
+}
+
+export interface ConversionRow {
+  site: string
+  kind: string   // phone | email | form | <custom name>
+  url: string
+  count: number
+  lastSeen: number
+}

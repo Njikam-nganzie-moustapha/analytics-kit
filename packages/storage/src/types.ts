@@ -1,9 +1,16 @@
+export interface GeoInfo {
+  country?: string | null
+  city?: string | null
+  region?: string | null
+}
+
 export interface AnalyticsEvent {
   t: number
   type: string
   sid: string
   site: string
   uid?: string
+  geo?: GeoInfo
   [key: string]: unknown
 }
 
