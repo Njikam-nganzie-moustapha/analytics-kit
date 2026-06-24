@@ -17,6 +17,9 @@ export const METRIC_HELP: Record<string, string> = {
   inp: 'Interaction to Next Paint — responsiveness to clicks/taps. Good ≤ 200ms.',
   ttfb: 'Time To First Byte — server response speed. Good ≤ 0.8s.',
   bounce: 'Sessions that left without meaningful interaction.',
+  pageviews: 'Total page views (sum of unique URLs visited across all sessions). Counts navigations, not just landing.',
+  bounceRate: 'Percentage of sessions where only one page was viewed before leaving. Lower is better for content sites.',
+  avgDuration: 'Average session duration. Longer usually means higher engagement.',
 }
 
 export function InfoTip({ help, label }: { help: string; label?: string }) {

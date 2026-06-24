@@ -21,9 +21,9 @@ const securityHeaders: MiddlewareHandler = async (c, next) => {
   await next()
   c.header('X-Content-Type-Options', 'nosniff')
   c.header('X-Frame-Options', 'DENY')
-  c.header('X-XSS-Protection', '1; mode=block')
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Cross-Origin-Resource-Policy', 'cross-origin')
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   c.header('Cache-Control', 'no-store')
   // CSP: analytics API returns JSON only — disallow rendering as page
   c.header('Content-Security-Policy', "default-src 'none'")
@@ -66,11 +66,18 @@ export function createApp(db: QueryTurso) {
 
   // Audience + overview (inline — mirror worker.ts)
   const fromOf = (c: { req: { query: (k: string) => string | undefined } }) => {
-    const raw = c.req.query('from'); return raw ? parseInt(raw) : undefined
+    const raw = c.req.query('from')
+    if (!raw) return undefined
+    const n = parseInt(raw, 10)
+    return isNaN(n) || n < 0 ? undefined : n
   }
   app.get('/traffic', async c => {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
-    return c.json({ sources: await db.getTrafficSources(p.site, fromOf(c)) })
+    const from = fromOf(c)
+    const toRaw = c.req.query('to'); const toN = toRaw ? parseInt(toRaw, 10) : undefined
+    const to = (toN && !isNaN(toN) && toN > 0) ? toN : undefined
+    const [sources, series] = await Promise.all([db.getTrafficSources(p.site, from, to), db.getChannelSeries(p.site, from, to)])
+    return c.json({ sources, series })
   })
   app.get('/geo', async c => {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
@@ -80,6 +87,21 @@ export function createApp(db: QueryTurso) {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
     return c.json({ devices: await db.getDeviceStats(p.site) })
   })
+  app.get('/realtime', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ visitors: await db.getRealtimeVisitors(p.site), window: 300 })
+  })
+
+  app.get('/screen-stats', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ screens: await db.getScreenStats(p.site) })
+  })
+  app.get('/pages', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const toRaw = c.req.query('to'); const toN = toRaw ? parseInt(toRaw, 10) : undefined
+    const to = (toN && !isNaN(toN) && toN > 0) ? toN : undefined
+    return c.json({ pages: await db.getTopPages(p.site, fromOf(c), to) })
+  })
   app.get('/conversions', async c => {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
     return c.json({ conversions: await db.getConversions(p.site, fromOf(c)) })
@@ -88,6 +110,18 @@ export function createApp(db: QueryTurso) {
     const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
     const [summary, sites] = await Promise.all([db.getOverview(p.site, fromOf(c)), db.getSiteTotals()])
     return c.json({ summary, sites })
+  })
+
+  app.get('/activity', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const _nd = parseInt(c.req.query('days') ?? '', 10)
+    const days = Math.max(1, Math.min(isNaN(_nd) ? 365 : _nd, 366))
+    return c.json({ days: await db.getActivity(p.site, days) })
+  })
+
+  app.get('/bots', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ bots: await db.getBots(p.site) })
   })
 
   // Funnels (inline — mirror worker.ts)
@@ -131,7 +165,7 @@ export function createApp(db: QueryTurso) {
       if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
       const html = (await resp.text()).slice(0, 1_500_000)
       return c.json(auditHtml(html, resp.url || target.url))
-    } catch (e) { return c.json({ error: `could not fetch page: ${e instanceof Error ? e.message : String(e)}` }, 502) }
+    } catch { return c.json({ error: 'could not fetch page: upstream connection failed' }, 502) }
   })
 
   app.get('/pagespeed', async c => {
@@ -139,13 +173,20 @@ export function createApp(db: QueryTurso) {
     if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
     const strategy = c.req.query('strategy') === 'desktop' ? 'desktop' : 'mobile'
     const key = process.env.PAGESPEED_API_KEY ? `&key=${process.env.PAGESPEED_API_KEY}` : ''
-    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&category=performance${key}`
+    const cats = 'category=performance&category=accessibility&category=seo&category=best-practices'
+    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&${cats}${key}`
     try {
       const r = await fetch(psi)
-      const data = await r.json() as { lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, { displayValue?: string; numericValue?: number }> }; error?: { message?: string } }
+      const data = await r.json() as {
+        lighthouseResult?: {
+          categories?: { performance?: { score?: number }; accessibility?: { score?: number }; seo?: { score?: number }; 'best-practices'?: { score?: number } }
+          audits?: Record<string, { displayValue?: string; numericValue?: number }>
+        }
+        error?: { message?: string }
+      }
       if (data.error) return c.json({ error: data.error.message ?? 'PageSpeed error' }, 502)
       const lr = data.lighthouseResult
-      const score = Math.round((lr?.categories?.performance?.score ?? 0) * 100)
+      const sc = (k: string) => Math.round(((lr?.categories as Record<string, { score?: number } | undefined>)?.[k]?.score ?? 0) * 100)
       const pick = (id: string, label: string) => ({ id, label, display: lr?.audits?.[id]?.displayValue ?? '—', numeric: lr?.audits?.[id]?.numericValue ?? null })
       const metrics = [
         pick('first-contentful-paint', 'First Contentful Paint'),
@@ -155,8 +196,16 @@ export function createApp(db: QueryTurso) {
         pick('speed-index', 'Speed Index'),
         pick('interactive', 'Time to Interactive'),
       ]
-      return c.json({ url: target.url, strategy, score, metrics })
-    } catch (e) { return c.json({ error: `PageSpeed request failed: ${e instanceof Error ? e.message : String(e)}` }, 502) }
+      return c.json({
+        url: target.url, strategy, score: sc('performance'), metrics,
+        categories: {
+          performance:   sc('performance'),
+          accessibility: sc('accessibility'),
+          seo:           sc('seo'),
+          bestPractices: sc('best-practices'),
+        },
+      })
+    } catch { return c.json({ error: 'PageSpeed request failed: upstream connection error' }, 502) }
   })
 
   app.get('/branding', async c => {

@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup, FeedbackItem } from './types'
+import type { HeatmapCell, ZoneStat, SessionStat, RawEvent, ErrorGroup, FeedbackItem, ClickElementRow, ScreenRow } from './types'
 import type { VitalBucket } from './vitals'
 import type { PagePerfStat } from './perf'
 
@@ -52,6 +52,24 @@ export class ProcessorTurso {
     await this._batchedUpsert(stmts)
   }
 
+  // ── Click elements ────────────────────────────────────────────────────────────
+
+  async upsertClickElements(rows: ClickElementRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO click_elements (site, url, el, device, count, updated)
+              VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT (site, url, el, device) DO UPDATE SET
+                count   = count + excluded.count,
+                updated = excluded.updated`,
+        args: [str(r.site), str(r.url), str(r.el), str(r.device), int(r.count), int(Date.now())],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
   // ── Zone stats ───────────────────────────────────────────────────────────────
 
   async upsertZoneStats(stats: ZoneStat[]): Promise<void> {
@@ -86,20 +104,22 @@ export class ProcessorTurso {
     const stmts: Extract<TursoReq, { type: 'execute' }>[] = stats.map(s => ({
       type: 'execute',
       stmt: {
-        sql: `INSERT INTO sessions (sid, site, uid, started, ended, duration, url_count, event_count, has_replay, has_error)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO sessions (sid, site, uid, started, ended, duration, url_count, event_count, has_replay, has_error, entry_url, exit_url)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT (sid) DO UPDATE SET
                 ended       = MAX(ended, excluded.ended),
                 duration    = MAX(duration, excluded.duration),
                 url_count   = MAX(url_count, excluded.url_count),
                 event_count = MAX(event_count, excluded.event_count),
                 has_replay  = MAX(has_replay, excluded.has_replay),
-                has_error   = MAX(has_error, excluded.has_error)`,
+                has_error   = MAX(has_error, excluded.has_error),
+                exit_url    = CASE WHEN excluded.ended > ended THEN excluded.exit_url ELSE exit_url END`,
         args: [
           str(s.sid), str(s.site), nullable(s.uid),
           int(s.started), int(s.ended), int(s.duration),
           int(s.urlCount), int(s.eventCount),
           int(s.hasReplay ? 1 : 0), int(s.hasError ? 1 : 0),
+          str(s.entryUrl), str(s.exitUrl),
         ],
       },
     }))
@@ -113,15 +133,38 @@ export class ProcessorTurso {
     const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
       type: 'execute',
       stmt: {
-        sql: `INSERT INTO traffic_sources (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, sessions, last_seen)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO traffic_sources (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, utm_content, utm_term, sessions, last_seen)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT (site, channel, referrer_host, utm_source, utm_medium, utm_campaign) DO UPDATE SET
-                sessions  = sessions + excluded.sessions,
-                last_seen = MAX(last_seen, excluded.last_seen)`,
+                sessions    = sessions + excluded.sessions,
+                last_seen   = MAX(last_seen, excluded.last_seen),
+                utm_content = COALESCE(NULLIF(excluded.utm_content, ''), utm_content),
+                utm_term    = COALESCE(NULLIF(excluded.utm_term, ''),    utm_term)`,
         args: [
           str(r.site), str(r.channel), str(r.referrerHost),
           str(r.utmSource), str(r.utmMedium), str(r.utmCampaign),
+          str(r.utmContent), str(r.utmTerm),
           int(r.sessions), int(r.lastSeen),
+        ],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  async upsertTrafficSourcesDaily(rows: import('./types').TrafficRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO traffic_sources_daily (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, utm_content, utm_term, day, sessions)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, day) DO UPDATE SET
+                sessions = sessions + excluded.sessions`,
+        args: [
+          str(r.site), str(r.channel), str(r.referrerHost),
+          str(r.utmSource), str(r.utmMedium), str(r.utmCampaign),
+          str(r.utmContent), str(r.utmTerm),
+          int(r.day), int(r.sessions),
         ],
       },
     }))
@@ -141,6 +184,23 @@ export class ProcessorTurso {
                 sessions  = sessions + excluded.sessions,
                 last_seen = MAX(last_seen, excluded.last_seen)`,
         args: [str(r.site), str(r.country), str(r.city), int(r.sessions), int(r.lastSeen)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  // ── Screen resolutions ────────────────────────────────────────────────────────
+
+  async upsertScreenStats(rows: ScreenRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO screen_stats (site, resolution, sessions)
+              VALUES (?, ?, ?)
+              ON CONFLICT (site, resolution) DO UPDATE SET
+                sessions = sessions + excluded.sessions`,
+        args: [str(r.site), str(r.resolution), int(r.sessions)],
       },
     }))
     await this._batchedUpsert(stmts)
@@ -176,6 +236,23 @@ export class ProcessorTurso {
                 count     = count + excluded.count,
                 last_seen = MAX(last_seen, excluded.last_seen)`,
         args: [str(r.site), str(r.kind), str(r.url), int(r.count), int(r.lastSeen)],
+      },
+    }))
+    await this._batchedUpsert(stmts)
+  }
+
+  async upsertBotStats(rows: import('./botstats').BotStatRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const stmts: Extract<TursoReq, { type: 'execute' }>[] = rows.map(r => ({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO ai_bots (site, bot, category, hits, last_seen)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (site, bot) DO UPDATE SET
+                hits      = hits + excluded.hits,
+                category  = excluded.category,
+                last_seen = MAX(last_seen, excluded.last_seen)`,
+        args: [str(r.site), str(r.bot), str(r.category), int(r.hits), int(r.lastSeen)],
       },
     }))
     await this._batchedUpsert(stmts)
@@ -709,6 +786,33 @@ export class ProcessorTurso {
         last_seen INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (site, kind, url)
       )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS screen_stats (
+        site       TEXT    NOT NULL,
+        resolution TEXT    NOT NULL,
+        sessions   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, resolution)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS ai_bots (
+        site      TEXT    NOT NULL,
+        bot       TEXT    NOT NULL,
+        category  TEXT    NOT NULL DEFAULT 'ai',
+        hits      INTEGER NOT NULL DEFAULT 0,
+        last_seen INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, bot)
+      )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS traffic_sources_daily (
+        site          TEXT    NOT NULL,
+        channel       TEXT    NOT NULL,
+        referrer_host TEXT    NOT NULL DEFAULT '',
+        utm_source    TEXT    NOT NULL DEFAULT '',
+        utm_medium    TEXT    NOT NULL DEFAULT '',
+        utm_campaign  TEXT    NOT NULL DEFAULT '',
+        utm_content   TEXT    NOT NULL DEFAULT '',
+        utm_term      TEXT    NOT NULL DEFAULT '',
+        day           INTEGER NOT NULL DEFAULT 0,
+        sessions      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, day)
+      )` }},
       { type: 'close' },
     ])
 
@@ -723,6 +827,22 @@ export class ProcessorTurso {
       { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0` } },
       { type: 'close' },
     ]).catch(() => { /* already exists */ })
+
+    // entry_url / exit_url columns on sessions (added post-launch)
+    for (const col of ["entry_url TEXT NOT NULL DEFAULT ''", "exit_url TEXT NOT NULL DEFAULT ''"]) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* already exists */ })
+    }
+
+    // utm_content + utm_term columns on traffic_sources (added post-launch)
+    for (const col of ["utm_content TEXT NOT NULL DEFAULT ''", "utm_term TEXT NOT NULL DEFAULT ''"]) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE traffic_sources ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* already exists */ })
+    }
   }
 
   // ── Internal ─────────────────────────────────────────────────────────────────

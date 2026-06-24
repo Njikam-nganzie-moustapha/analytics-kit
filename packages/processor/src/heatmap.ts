@@ -1,4 +1,4 @@
-import type { RawEvent, HeatmapCell } from './types'
+import type { RawEvent, HeatmapCell, ClickElementRow } from './types'
 
 export const CELL_PX = 10   // one grid cell = 10px × 10px
 
@@ -29,6 +29,30 @@ export function buildHeatmapCells(events: RawEvent[]): HeatmapCell[] {
       cell.count++
     } else {
       map.set(key, { site: e.site, url, gx, gy, count: 1 })
+    }
+  }
+
+  return Array.from(map.values())
+}
+
+// Build per-element click counts for ranking (element label × device × url)
+export function buildClickElements(events: RawEvent[]): ClickElementRow[] {
+  const map = new Map<string, ClickElementRow>()
+
+  for (const e of events) {
+    if (e.type !== 'click') continue
+    if (typeof e.el !== 'string' || !e.el.trim()) continue
+
+    const url    = normalizeUrl(String(e.url ?? '/'))
+    const el     = e.el.trim().slice(0, 60)
+    const device = typeof e.device === 'string' ? e.device : 'desktop'
+    const key    = `${e.site}\x00${url}\x00${el}\x00${device}`
+
+    const row = map.get(key)
+    if (row) {
+      row.count++
+    } else {
+      map.set(key, { site: e.site, url, el, device, count: 1 })
     }
   }
 

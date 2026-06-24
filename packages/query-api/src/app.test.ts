@@ -93,8 +93,12 @@ describe('GET /sessions', () => {
 })
 
 describe('GET /replay/:sid', () => {
-  it('returns events array', async () => {
+  it('returns 400 without site param', async () => {
     const res = await createApp(makeDb()).request('/replay/abc')
+    expect(res.status).toBe(400)
+  })
+  it('returns events array when site provided', async () => {
+    const res = await createApp(makeDb()).request('/replay/abc?site=test')
     expect(res.status).toBe(200)
     const body = await res.json() as Record<string, unknown>
     expect(Array.isArray(body.events)).toBe(true)

@@ -9,6 +9,14 @@
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
+// Constant-time string comparison via HMAC to prevent timing-oracle attacks on
+// API keys. Uses an ephemeral key so the MAC never leaves this call.
+export async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const key = await crypto.subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(a))
+  return crypto.subtle.verify('HMAC', key, mac, enc.encode(b))
+}
+
 export const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000 // 12h
 
 function b64url(bytes: Uint8Array): string {

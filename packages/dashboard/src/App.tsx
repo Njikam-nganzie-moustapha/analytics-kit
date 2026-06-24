@@ -22,8 +22,10 @@ const OverviewView     = lazy(() => import('./components/overview/OverviewView')
 const TrafficView      = lazy(() => import('./components/audience/TrafficView').then(m => ({ default: m.TrafficView })))
 const GeoView          = lazy(() => import('./components/audience/GeoView').then(m => ({ default: m.GeoView })))
 const DevicesView      = lazy(() => import('./components/audience/DevicesView').then(m => ({ default: m.DevicesView })))
+const BotsView         = lazy(() => import('./components/audience/BotsView').then(m => ({ default: m.BotsView })))
 const ConversionsView  = lazy(() => import('./components/conversions/ConversionsView').then(m => ({ default: m.ConversionsView })))
 const FunnelsView      = lazy(() => import('./components/behavior/FunnelsView').then(m => ({ default: m.FunnelsView })))
+const PagesView        = lazy(() => import('./components/behavior/PagesView').then(m => ({ default: m.PagesView })))
 const SeoView          = lazy(() => import('./components/audit/SeoView').then(m => ({ default: m.SeoView })))
 const PageSpeedView    = lazy(() => import('./components/audit/PageSpeedView').then(m => ({ default: m.PageSpeedView })))
 const BrandingView     = lazy(() => import('./components/settings/BrandingView').then(m => ({ default: m.BrandingView })))
@@ -197,7 +199,9 @@ export function App() {
       case 'traffic': return <TrafficView site={query.site} from={from} />
       case 'geo': return <GeoView site={query.site} />
       case 'devices': return <DevicesView site={query.site} />
+      case 'bots': return <BotsView site={query.site} />
       case 'conversions': return <ConversionsView site={query.site} from={from} />
+      case 'pages': return <PagesView site={query.site} from={from} />
       case 'funnels': return <FunnelsView site={query.site} from={from} />
       case 'seo': return <SeoView />
       case 'pagespeed': return <PageSpeedView />

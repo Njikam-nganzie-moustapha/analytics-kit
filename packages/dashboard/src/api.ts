@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ScreenStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding, PageRow, ActivityDay, ChannelSeriesPoint, BotStat } from './types'
 
 const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const TOKEN_KEY = 'analyticskit_token'
@@ -287,10 +287,13 @@ export async function deleteSourceMap(site: string, release: string, filename: s
 
 // ── Audience + overview ─────────────────────────────────────────────────────────
 
-export async function fetchTraffic(site: string, from?: number): Promise<TrafficSource[]> {
-  const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
+export async function fetchTraffic(site: string, from?: number, to?: number): Promise<{ sources: TrafficSource[]; series: ChannelSeriesPoint[] }> {
+  const q = new URLSearchParams({ site })
+  if (from) q.set('from', String(from))
+  if (to)   q.set('to',   String(to))
   const res = await apiFetch(`${BASE}/traffic?${q}`, { headers: hdrs() })
-  return (await res.json() as { sources: TrafficSource[] }).sources ?? []
+  const json = await res.json() as { sources?: TrafficSource[]; series?: ChannelSeriesPoint[] }
+  return { sources: json.sources ?? [], series: json.series ?? [] }
 }
 
 export async function fetchGeo(site: string): Promise<GeoStat[]> {
@@ -303,6 +306,27 @@ export async function fetchDevices(site: string): Promise<DeviceStat[]> {
   return (await res.json() as { devices: DeviceStat[] }).devices ?? []
 }
 
+export async function fetchScreenStats(site: string): Promise<ScreenStat[]> {
+  const res = await apiFetch(`${BASE}/screen-stats?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { screens: ScreenStat[] }).screens ?? []
+}
+
+export async function fetchPages(site: string, from?: number, to?: number): Promise<PageRow[]> {
+  const q = new URLSearchParams({ site })
+  if (from) q.set('from', String(from))
+  if (to)   q.set('to',   String(to))
+  const res = await apiFetch(`${BASE}/pages?${q}`, { headers: hdrs() })
+  return (await res.json() as { pages: PageRow[] }).pages ?? []
+}
+
+export async function fetchRealtime(site: string): Promise<number> {
+  try {
+    const res = await apiFetch(`${BASE}/realtime?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+    if (!res.ok) return 0
+    return ((await res.json()) as { visitors: number }).visitors ?? 0
+  } catch { return 0 }
+}
+
 export async function fetchConversions(site: string, from?: number): Promise<ConversionStat[]> {
   const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
   const res = await apiFetch(`${BASE}/conversions?${q}`, { headers: hdrs() })
@@ -313,6 +337,16 @@ export async function fetchOverview(site: string, from?: number): Promise<{ summ
   const q = new URLSearchParams({ site }); if (from) q.set('from', String(from))
   const res = await apiFetch(`${BASE}/overview?${q}`, { headers: hdrs() })
   return await res.json() as { summary: OverviewSummary; sites: SiteTotal[] }
+}
+
+export async function fetchActivity(site: string, days = 365): Promise<ActivityDay[]> {
+  const res = await apiFetch(`${BASE}/activity?site=${encodeURIComponent(site)}&days=${days}`, { headers: hdrs() })
+  return (await res.json() as { days: ActivityDay[] }).days ?? []
+}
+
+export async function fetchBots(site: string): Promise<BotStat[]> {
+  const res = await apiFetch(`${BASE}/bots?site=${encodeURIComponent(site)}`, { headers: hdrs() })
+  return (await res.json() as { bots: BotStat[] }).bots ?? []
 }
 
 // ── Funnels ─────────────────────────────────────────────────────────────────────

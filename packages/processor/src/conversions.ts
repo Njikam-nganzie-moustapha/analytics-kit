@@ -1,6 +1,7 @@
 import type { RawEvent, ConversionRow } from './types'
 
 const CONVERSION_CUSTOM = /^(lead|signup|sign_up|purchase|checkout|contact|subscribe|conversion|form_submit|booking|demo)/i
+const DOWNLOAD_EXT = /\.(pdf|zip|xlsx?|docx?|pptx?|csv|mp3|mp4|avi|mov|dmg|exe|pkg|deb|rpm)(\?.*)?$/i
 
 function normUrl(url: unknown): string {
   if (typeof url !== 'string') return ''
@@ -29,6 +30,7 @@ export function buildConversions(events: RawEvent[]): ConversionRow[] {
       const href = typeof e.href === 'string' ? e.href : ''
       if (href.startsWith('tel:')) bump(e.site, 'phone', normUrl(e.url), e.t)
       else if (href.startsWith('mailto:')) bump(e.site, 'email', normUrl(e.url), e.t)
+      else if (DOWNLOAD_EXT.test(href)) bump(e.site, 'download', normUrl(e.url), e.t)
     } else if (e.type === 'custom') {
       const name = typeof e.name === 'string' ? e.name : ''
       if (CONVERSION_CUSTOM.test(name)) bump(e.site, name.slice(0, 40).toLowerCase(), normUrl(e.url), e.t)

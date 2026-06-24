@@ -45,6 +45,10 @@ export interface HeatmapRow {
   site: string; url: string; gx: number; gy: number; count: number
 }
 
+export interface ClickElementRow {
+  site: string; url: string; el: string; device: string; count: number
+}
+
 export interface ZoneRow {
   site: string; zoneId: string; url: string
   enters: number; clicks: number; avgDwell: number
@@ -176,6 +180,7 @@ export interface FeedbackRow {
 export interface TrafficSourceRow {
   site: string; channel: string; referrerHost: string
   utmSource: string; utmMedium: string; utmCampaign: string
+  utmContent: string; utmTerm: string
   sessions: number; lastSeen: number
 }
 
@@ -191,6 +196,14 @@ export interface ConversionStatRow {
   site: string; kind: string; url: string; count: number; lastSeen: number
 }
 
+export interface ScreenStatRow {
+  site: string; resolution: string; sessions: number
+}
+
+export interface BotStatRow {
+  site: string; bot: string; category: string; hits: number; lastSeen: number
+}
+
 export interface OverviewSummary {
   site: string
   sessions: number
@@ -202,6 +215,15 @@ export interface OverviewSummary {
   perfP75: number            // ms
   health: number             // 0–100
   series: { day: number; sessions: number; errors: number }[]
+  // New KPIs:
+  pageviews: number
+  bounceRate: number         // 0–100 (% of single-page sessions)
+  avgDuration: number        // ms
+  // Previous period (for delta badges in UI):
+  prevSessions: number
+  prevUsers: number
+  prevConversions: number
+  prevErrorRate: number      // 0–100
 }
 
 export interface SiteTotal { site: string; sessions: number; lastSeen: number }
@@ -241,6 +263,25 @@ export class QueryTurso {
     return rows.map(r => ({
       site: r.site!, url: r.url!,
       gx: parseInt(r.gx!), gy: parseInt(r.gy!), count: parseInt(r.count!),
+    }))
+  }
+
+  async getClickElements(site: string, url?: string, device?: string): Promise<ClickElementRow[]> {
+    const conds = ['site = ?']
+    const args: TursoArg[] = [str(site)]
+    if (url    !== undefined) { conds.push('url = ?');    args.push(str(url)) }
+    if (device !== undefined && device !== 'all') { conds.push('device = ?'); args.push(str(device)) }
+
+    const sql = `SELECT site, url, el, device, SUM(count) AS count
+                 FROM click_elements
+                 WHERE ${conds.join(' AND ')}
+                 GROUP BY site, url, el, device
+                 ORDER BY count DESC
+                 LIMIT 30`
+    const rows = await this._query(sql, args)
+    return rows.map(r => ({
+      site: r.site!, url: r.url!, el: r.el!, device: r.device!,
+      count: parseInt(r.count!),
     }))
   }
 
@@ -726,19 +767,55 @@ export class QueryTurso {
 
   // ── Audience: traffic / geo / devices ─────────────────────────────────────────
 
-  async getTrafficSources(site: string, from?: number): Promise<TrafficSourceRow[]> {
+  async getTrafficSources(site: string, from?: number, to?: number): Promise<TrafficSourceRow[]> {
+    const map = (r: Record<string, string | null>): TrafficSourceRow => ({
+      site: r.site!, channel: r.channel as TrafficSourceRow['channel'], referrerHost: r.referrer_host ?? '',
+      utmSource: r.utm_source ?? '', utmMedium: r.utm_medium ?? '', utmCampaign: r.utm_campaign ?? '',
+      utmContent: r.utm_content ?? '', utmTerm: r.utm_term ?? '',
+      sessions: parseInt(r.sessions ?? '0'), lastSeen: parseInt(r.last_seen ?? '0'),
+    })
+    if (from !== undefined) {
+      const fromDay = Math.floor(from / 86_400_000)
+      const conds = ['site = ?', 'day >= ?']
+      const args: TursoArg[] = [str(site), int(fromDay)]
+      if (to !== undefined) { conds.push('day < ?'); args.push(int(Math.ceil(to / 86_400_000))) }
+      const rows = await this._query(
+        `SELECT site, channel, referrer_host,
+                utm_source, utm_medium, utm_campaign,
+                COALESCE(utm_content, '') AS utm_content, COALESCE(utm_term, '') AS utm_term,
+                SUM(sessions) AS sessions, CAST(MAX(day) * 86400000 AS TEXT) AS last_seen
+         FROM traffic_sources_daily WHERE ${conds.join(' AND ')}
+         GROUP BY site, channel, referrer_host, utm_source, utm_medium, utm_campaign
+         ORDER BY sessions DESC LIMIT 500`,
+        args,
+      )
+      return rows.map(map)
+    }
+    const rows = await this._query(
+      `SELECT site, channel, referrer_host, utm_source, utm_medium, utm_campaign,
+              COALESCE(utm_content, '') AS utm_content, COALESCE(utm_term, '') AS utm_term,
+              sessions, last_seen
+       FROM traffic_sources WHERE site = ? ORDER BY sessions DESC LIMIT 500`,
+      [str(site)],
+    )
+    return rows.map(map)
+  }
+
+  async getChannelSeries(site: string, from?: number, to?: number): Promise<{ day: number; channel: string; sessions: number }[]> {
     const conds = ['site = ?']
     const args: TursoArg[] = [str(site)]
-    if (from !== undefined) { conds.push('last_seen >= ?'); args.push(int(from)) }
+    if (from !== undefined) { conds.push('day >= ?'); args.push(int(Math.floor(from / 86_400_000))) }
+    if (to  !== undefined) { conds.push('day < ?');  args.push(int(Math.ceil(to / 86_400_000))) }
     const rows = await this._query(
-      `SELECT site, channel, referrer_host, utm_source, utm_medium, utm_campaign, sessions, last_seen
-       FROM traffic_sources WHERE ${conds.join(' AND ')} ORDER BY sessions DESC LIMIT 500`,
+      `SELECT day, channel, SUM(sessions) AS sessions
+       FROM traffic_sources_daily WHERE ${conds.join(' AND ')}
+       GROUP BY day, channel ORDER BY day ASC LIMIT 2000`,
       args,
     )
     return rows.map(r => ({
-      site: r.site!, channel: r.channel!, referrerHost: r.referrer_host ?? '',
-      utmSource: r.utm_source ?? '', utmMedium: r.utm_medium ?? '', utmCampaign: r.utm_campaign ?? '',
-      sessions: parseInt(r.sessions ?? '0'), lastSeen: parseInt(r.last_seen ?? '0'),
+      day: parseInt(r.day ?? '0'),
+      channel: r.channel ?? 'direct',
+      sessions: parseInt(r.sessions ?? '0'),
     }))
   }
 
@@ -760,6 +837,101 @@ export class QueryTurso {
     return rows.map(r => ({
       site: r.site!, deviceType: r.device_type ?? 'desktop', browser: r.browser ?? 'Other',
       os: r.os ?? 'Other', sessions: parseInt(r.sessions ?? '0'),
+    }))
+  }
+
+  async getBots(site: string): Promise<BotStatRow[]> {
+    const rows = await this._query(
+      `SELECT site, bot, category, hits, last_seen FROM ai_bots WHERE site = ? ORDER BY hits DESC LIMIT 200`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      site: r.site!, bot: r.bot ?? 'Unknown', category: r.category ?? 'other',
+      hits: parseInt(r.hits ?? '0'), lastSeen: parseInt(r.last_seen ?? '0'),
+    }))
+  }
+
+  async getRealtimeVisitors(site: string): Promise<number> {
+    const since = Date.now() - 5 * 60 * 1000
+    const rows = await this._query(
+      `SELECT COUNT(DISTINCT sid) AS n FROM analytics_events WHERE site = ? AND ts > ?`,
+      [str(site), int(since)],
+    )
+    return parseInt(rows[0]?.n ?? '0')
+  }
+
+  async getTopPages(site: string, from?: number, to?: number): Promise<{ url: string; views: number; entries: number; exits: number; bounceRate: number; avgDuration: number }[]> {
+    const fromT = from ?? 0
+    const evConds = ['site = ?', "type = 'pageview'", 't >= ?']
+    const evArgs: TursoArg[] = [str(site), int(fromT)]
+    if (to !== undefined) { evConds.push('t < ?'); evArgs.push(int(to)) }
+
+    const sesConds = ['site = ?', 'started >= ?', "entry_url != ''"]
+    const sesArgs: TursoArg[] = [str(site), int(fromT)]
+    if (to !== undefined) { sesConds.push('started < ?'); sesArgs.push(int(to)) }
+
+    const exitConds = ['site = ?', 'started >= ?', "exit_url != ''"]
+    const exitArgs: TursoArg[] = [str(site), int(fromT)]
+    if (to !== undefined) { exitConds.push('started < ?'); exitArgs.push(int(to)) }
+
+    const [viewRows, entryRows, exitRows] = await Promise.all([
+      this._query(
+        `SELECT payload, t FROM analytics_events WHERE ${evConds.join(' AND ')} ORDER BY t DESC LIMIT 100000`,
+        evArgs,
+      ),
+      this._query(
+        `SELECT entry_url AS url, COUNT(*) AS entries,
+                SUM(CASE WHEN url_count <= 1 THEN 1 ELSE 0 END) AS bounces,
+                CAST(AVG(duration) AS INTEGER) AS avg_dur
+         FROM sessions WHERE ${sesConds.join(' AND ')}
+         GROUP BY entry_url ORDER BY entries DESC LIMIT 200`,
+        sesArgs,
+      ),
+      this._query(
+        `SELECT exit_url AS url, COUNT(*) AS cnt FROM sessions WHERE ${exitConds.join(' AND ')} GROUP BY exit_url ORDER BY cnt DESC LIMIT 200`,
+        exitArgs,
+      ),
+    ])
+
+    const views = new Map<string, number>()
+    for (const r of viewRows) {
+      if (!r.payload) continue
+      try {
+        const p = JSON.parse(r.payload) as Record<string, unknown>
+        const u = String(p.url ?? (p.payload as Record<string, unknown> | null)?.url ?? '').slice(0, 500)
+        if (u) views.set(u, (views.get(u) ?? 0) + 1)
+      } catch { /* skip */ }
+    }
+    const entryData = new Map<string, { entries: number; bounces: number; avgDur: number }>()
+    for (const r of entryRows) {
+      if (r.url) entryData.set(r.url, {
+        entries: parseInt(r.entries ?? '0'),
+        bounces: parseInt(r.bounces ?? '0'),
+        avgDur:  parseInt(r.avg_dur  ?? '0'),
+      })
+    }
+    const exits = new Map<string, number>()
+    for (const r of exitRows) if (r.url) exits.set(r.url, parseInt(r.cnt ?? '0'))
+
+    return [...views.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 100)
+      .map(([url, v]) => {
+        const ed = entryData.get(url)
+        const entries    = ed?.entries ?? 0
+        const bounces    = ed?.bounces ?? 0
+        const bounceRate = entries > 0 ? Math.round((bounces / entries) * 100) : 0
+        return { url, views: v, entries, exits: exits.get(url) ?? 0, bounceRate, avgDuration: ed?.avgDur ?? 0 }
+      })
+  }
+
+  async getScreenStats(site: string): Promise<ScreenStatRow[]> {
+    const rows = await this._query(
+      `SELECT site, resolution, sessions FROM screen_stats WHERE site = ? ORDER BY sessions DESC LIMIT 200`,
+      [str(site)],
+    )
+    return rows.map(r => ({
+      site: r.site!, resolution: r.resolution!, sessions: parseInt(r.sessions ?? '0'),
     }))
   }
 
@@ -787,15 +959,34 @@ export class QueryTurso {
   // ── Overview + 0–100 health score ──────────────────────────────────────────────
 
   async getOverview(site: string, from?: number): Promise<OverviewSummary> {
+    const now = Date.now()
     const fromT = from ?? 0
-    const [sess, vit, conv, perf, series] = await Promise.all([
+    // Previous period mirrors the current window length immediately before it
+    const duration = fromT > 0 ? now - fromT : 0
+    const prevFrom = fromT > 0 ? fromT - duration : 0
+
+    const [sess, sessPrev, vit, conv, convPrev, perf, series] = await Promise.all([
       this._query(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(has_error),0) AS errs, COUNT(DISTINCT uid) AS users
+        `SELECT COUNT(*) AS n, COALESCE(SUM(has_error),0) AS errs, COUNT(DISTINCT uid) AS users,
+                COALESCE(SUM(url_count),0) AS pageviews,
+                COALESCE(AVG(duration),0) AS avg_dur,
+                SUM(CASE WHEN url_count <= 1 THEN 1 ELSE 0 END) AS bounces
          FROM sessions WHERE site = ? AND started >= ?`, [str(site), int(fromT)]),
+      fromT > 0
+        ? this._query(
+          `SELECT COUNT(*) AS n, COALESCE(SUM(has_error),0) AS errs, COUNT(DISTINCT uid) AS users
+           FROM sessions WHERE site = ? AND started >= ? AND started < ?`,
+          [str(site), int(prevFrom), int(fromT)])
+        : Promise.resolve([{ n: '0', errs: '0', users: '0' }]),
       this._query(
         `SELECT COALESCE(SUM(good),0) AS g, COALESCE(SUM(total),0) AS t FROM vitals_summary WHERE site = ?`, [str(site)]),
       this._query(
         `SELECT COALESCE(SUM(count),0) AS c FROM conversions WHERE site = ? AND last_seen >= ?`, [str(site), int(fromT)]),
+      fromT > 0
+        ? this._query(
+          `SELECT COALESCE(SUM(count),0) AS c FROM conversions WHERE site = ? AND last_seen >= ? AND last_seen < ?`,
+          [str(site), int(prevFrom), int(fromT)])
+        : Promise.resolve([{ c: '0' }]),
       this._query(
         `SELECT COALESCE(AVG(p75),0) AS p FROM page_perf WHERE site = ?`, [str(site)]),
       this._query(
@@ -803,29 +994,60 @@ export class QueryTurso {
          FROM sessions WHERE site = ? AND started >= ? GROUP BY day ORDER BY day ASC LIMIT 120`, [str(site), int(fromT)]),
     ])
 
-    const sessions = parseInt(sess[0]?.n ?? '0')
-    const errorSessions = parseInt(sess[0]?.errs ?? '0')
-    const users = parseInt(sess[0]?.users ?? '0')
-    const conversions = parseInt(conv[0]?.c ?? '0')
-    const vGood = parseInt(vit[0]?.g ?? '0')
-    const vTotal = parseInt(vit[0]?.t ?? '0')
+    const sessions      = parseInt(sess[0]?.n       ?? '0')
+    const errorSessions = parseInt(sess[0]?.errs    ?? '0')
+    const users         = parseInt(sess[0]?.users   ?? '0')
+    const pageviews     = parseInt(sess[0]?.pageviews ?? '0')
+    const avgDuration   = Math.round(parseFloat(sess[0]?.avg_dur ?? '0'))
+    const bounces       = parseInt(sess[0]?.bounces ?? '0')
+    const bounceRate    = sessions > 0 ? Math.round((bounces / sessions) * 100) : 0
+
+    const prevSessions      = parseInt(sessPrev[0]?.n    ?? '0')
+    const prevErrorSessions = parseInt(sessPrev[0]?.errs ?? '0')
+    const prevUsers         = parseInt(sessPrev[0]?.users ?? '0')
+    const conversions       = parseInt(conv[0]?.c     ?? '0')
+    const prevConversions   = parseInt(convPrev[0]?.c ?? '0')
+
+    const vGood   = parseInt(vit[0]?.g ?? '0')
+    const vTotal  = parseInt(vit[0]?.t ?? '0')
     const perfP75 = Math.round(parseFloat(perf[0]?.p ?? '0'))
 
-    const vitalsGoodPct = vTotal > 0 ? Math.round((vGood / vTotal) * 100) : 0
-    const errorRate = sessions > 0 ? Math.round((errorSessions / sessions) * 100) : 0
+    const vitalsGoodPct   = vTotal > 0 ? Math.round((vGood / vTotal) * 100) : 0
+    const errorRate       = sessions     > 0 ? Math.round((errorSessions     / sessions)     * 100) : 0
+    const prevErrorRate   = prevSessions > 0 ? Math.round((prevErrorSessions / prevSessions) * 100) : 0
 
-    // Health = blend of vitals (good %), reliability (1 - error rate), and speed
-    // (p75 mapped: ≤1s→100, ≥6s→0). Each weighted; clamped to 0–100.
-    const perfScore = perfP75 <= 0 ? 100 : Math.max(0, Math.min(100, Math.round(100 - ((perfP75 - 1000) / 5000) * 100)))
+    const perfScore       = perfP75 <= 0 ? 100 : Math.max(0, Math.min(100, Math.round(100 - ((perfP75 - 1000) / 5000) * 100)))
     const reliabilityScore = 100 - errorRate
-    const vitalsScore = vTotal > 0 ? vitalsGoodPct : 100
-    const health = Math.max(0, Math.min(100, Math.round(0.45 * vitalsScore + 0.35 * reliabilityScore + 0.20 * perfScore)))
+    const vitalsScore     = vTotal > 0 ? vitalsGoodPct : 100
+    const health          = Math.max(0, Math.min(100, Math.round(0.45 * vitalsScore + 0.35 * reliabilityScore + 0.20 * perfScore)))
 
     return {
       site, sessions, users, errorSessions, errorRate, conversions,
       vitalsGoodPct, perfP75, health,
+      pageviews, bounceRate, avgDuration,
+      prevSessions, prevUsers, prevConversions, prevErrorRate,
       series: series.map(r => ({ day: parseInt(r.day ?? '0'), sessions: parseInt(r.n ?? '0'), errors: parseInt(r.e ?? '0') })),
     }
+  }
+
+  // ── Activity calendar (GitHub-style contribution graph) ────────────────────────
+
+  // Daily session counts for the last `days` days (UTC), zero-filled, oldest→newest.
+  async getActivity(site: string, days = 365): Promise<{ day: string; sessions: number }[]> {
+    const span = Math.max(1, Math.min(days, 366))
+    const since = Date.now() - span * 86_400_000
+    const rows = await this._query(
+      `SELECT date(started/1000,'unixepoch') AS d, COUNT(*) AS n
+         FROM sessions WHERE site = ? AND started >= ?
+         GROUP BY d`, [str(site), int(since)])
+    const byDay = new Map<string, number>()
+    for (const r of rows) if (r.d) byDay.set(r.d, parseInt(r.n ?? '0'))
+    const out: { day: string; sessions: number }[] = []
+    for (let i = span - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10)
+      out.push({ day: d, sessions: byDay.get(d) ?? 0 })
+    }
+    return out
   }
 
   // ── Branding (white-label) ─────────────────────────────────────────────────────
@@ -922,13 +1144,11 @@ export class QueryTurso {
     return { counts, total: sids.size }
   }
 
-  async getReplayEvents(sid: string): Promise<ReplayEvent[]> {
-    const sql = `SELECT payload
-                 FROM analytics_events
-                 WHERE sid = ? AND type LIKE 'rrweb%'
-                 ORDER BY t ASC
-                 LIMIT 10000`
-    const rows = await this._query(sql, [str(sid)])
+  async getReplayEvents(sid: string, site?: string): Promise<ReplayEvent[]> {
+    const sql = site
+      ? `SELECT payload FROM analytics_events WHERE sid = ? AND site = ? AND type LIKE 'rrweb%' ORDER BY t ASC LIMIT 10000`
+      : `SELECT payload FROM analytics_events WHERE sid = ? AND type LIKE 'rrweb%' ORDER BY t ASC LIMIT 10000`
+    const rows = await this._query(sql, site ? [str(sid), str(site)] : [str(sid)])
     return rows.flatMap(r => {
       if (!r.payload) return []
       try {
@@ -1077,6 +1297,21 @@ export class QueryTurso {
       { type: 'close' },
     ])
 
+    // click_elements — per-element click counts (element label × device × url)
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS click_elements (
+          site    TEXT    NOT NULL,
+          url     TEXT    NOT NULL,
+          el      TEXT    NOT NULL,
+          device  TEXT    NOT NULL DEFAULT 'desktop',
+          count   INTEGER NOT NULL DEFAULT 0,
+          updated INTEGER NOT NULL,
+          PRIMARY KEY (site, url, el, device)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE INDEX IF NOT EXISTS idx_click_elements_site_url ON click_elements (site, url, count DESC)` } },
+      { type: 'close' },
+    ])
+
     // heatmap_cells / zone_stats / sessions — must exist before processor INSERTs or query-api SELECTs
     await this._pipeline([
       { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS heatmap_cells (
@@ -1170,6 +1405,54 @@ export class QueryTurso {
       { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0` } },
       { type: 'close' },
     ]).catch(() => { /* already exists */ })
+
+    // entry_url / exit_url columns on sessions (added post-launch)
+    for (const col of ["entry_url TEXT NOT NULL DEFAULT ''", "exit_url TEXT NOT NULL DEFAULT ''"]) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE sessions ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* already exists */ })
+    }
+
+    // utm_content + utm_term columns on traffic_sources (added post-launch)
+    for (const col of ["utm_content TEXT NOT NULL DEFAULT ''", "utm_term TEXT NOT NULL DEFAULT ''"]) {
+      await this._pipeline([
+        { type: 'execute', stmt: { sql: `ALTER TABLE traffic_sources ADD COLUMN ${col}` } },
+        { type: 'close' },
+      ]).catch(() => { /* already exists */ })
+    }
+
+    // screen_stats — viewport resolutions per site
+    await this._pipeline([
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS screen_stats (
+          site       TEXT    NOT NULL,
+          resolution TEXT    NOT NULL,
+          sessions   INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, resolution)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS ai_bots (
+          site      TEXT    NOT NULL,
+          bot       TEXT    NOT NULL,
+          category  TEXT    NOT NULL DEFAULT 'ai',
+          hits      INTEGER NOT NULL DEFAULT 0,
+          last_seen INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, bot)
+        )` }},
+      { type: 'execute', stmt: { sql: `CREATE TABLE IF NOT EXISTS traffic_sources_daily (
+          site          TEXT    NOT NULL,
+          channel       TEXT    NOT NULL,
+          referrer_host TEXT    NOT NULL DEFAULT '',
+          utm_source    TEXT    NOT NULL DEFAULT '',
+          utm_medium    TEXT    NOT NULL DEFAULT '',
+          utm_campaign  TEXT    NOT NULL DEFAULT '',
+          utm_content   TEXT    NOT NULL DEFAULT '',
+          utm_term      TEXT    NOT NULL DEFAULT '',
+          day           INTEGER NOT NULL DEFAULT 0,
+          sessions      INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (site, channel, referrer_host, utm_source, utm_medium, utm_campaign, day)
+        )` }},
+      { type: 'close' },
+    ])
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
