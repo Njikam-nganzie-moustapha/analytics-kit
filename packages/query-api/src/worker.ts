@@ -3,7 +3,7 @@ import { cors } from 'hono/cors'
 import type { MiddlewareHandler } from 'hono'
 import { QueryTurso } from './turso'
 import { parseSite, parseRelease, parseFilename, parseSteps, parseAuditUrl } from './validate'
-import { signToken, verifyToken } from './token'
+import { signToken, verifyToken, constantTimeEqual } from './token'
 import { auditHtml } from './seo'
 
 const HSL_RE = /^\d{1,3} \d{1,3}% \d{1,3}%$/
@@ -22,9 +22,9 @@ const securityHeaders: MiddlewareHandler = async (c, next) => {
   await next()
   c.header('X-Content-Type-Options', 'nosniff')
   c.header('X-Frame-Options', 'DENY')
-  c.header('X-XSS-Protection', '1; mode=block')
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Cross-Origin-Resource-Policy', 'same-site')
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   c.header('Cache-Control', 'no-store')
   c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
   // API returns JSON only — disallow rendering as a page
@@ -36,6 +36,36 @@ const VALID_STATUSES = new Set(['open', 'ignored', 'resolved', 'regressed'])
 // Per-isolate schema init flag
 let schemaReady = false
 let warnedCors = false
+
+// Brute-force guard on POST /auth: max 10 attempts per IP per 5 minutes
+const authAttempts = new Map<string, { count: number; windowStart: number }>()
+function isAuthRateLimited(ip: string, now: number): boolean {
+  const WINDOW = 5 * 60 * 1000; const MAX = 10
+  // Periodic eviction of expired windows
+  if (now % 30_000 < 500) for (const [k, v] of authAttempts) if (now - v.windowStart > WINDOW) authAttempts.delete(k)
+  const e = authAttempts.get(ip)
+  if (!e || now - e.windowStart > WINDOW) { authAttempts.set(ip, { count: 1, windowStart: now }); return false }
+  e.count++; return e.count > MAX
+}
+
+// Safe integer parser: returns fallback on NaN, clamps to [min, max]
+function safeInt(raw: string | undefined, fallback: number, min?: number, max?: number): number {
+  const n = parseInt(raw ?? '', 10)
+  const v = isNaN(n) ? fallback : n
+  if (min !== undefined && v < min) return min
+  if (max !== undefined && v > max) return max
+  return v
+}
+
+// Timestamp param: undefined if missing or invalid
+function parseTs(raw: string | undefined): number | undefined {
+  if (!raw) return undefined
+  const n = parseInt(raw, 10)
+  return isNaN(n) || n < 0 ? undefined : n
+}
+
+// Monitor name allowlist: alphanumeric + hyphen + underscore + dot, max 100 chars
+const MONITOR_RE = /^[a-zA-Z0-9_\-.]{1,100}$/
 
 function makeApp(env: Env) {
   const db  = new QueryTurso(env.TURSO_URL, env.TURSO_TOKEN)
@@ -72,9 +102,14 @@ function makeApp(env: Env) {
   // ── Auth ──────────────────────────────────────────────────────────────────
   app.get('/auth', c => c.json({ required: !!(env.DASHBOARD_PASSWORD && env.QUERY_API_KEY) }))
   app.post('/auth', async c => {
+    const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'anon'
+    if (isAuthRateLimited(ip, Date.now())) return c.json({ error: 'too many requests' }, 429)
     if (!env.DASHBOARD_PASSWORD || !env.QUERY_API_KEY) return c.json({ token: null, required: false })
     const body = await c.req.json<{ password?: string }>().catch(() => ({} as { password?: string }))
-    if (body.password !== env.DASHBOARD_PASSWORD) return c.json({ error: 'invalid password' }, 401)
+    if (body.password !== env.DASHBOARD_PASSWORD) {
+      console.warn('[query-api] /auth failed —', ip)
+      return c.json({ error: 'invalid password' }, 401)
+    }
     // Hand back a short-lived signed token — never the static QUERY_API_KEY.
     const { token, exp } = await signToken(env.QUERY_API_KEY)
     return c.json({ token, exp, required: true })
@@ -83,15 +118,20 @@ function makeApp(env: Env) {
   // Auth guard for all data routes. Accepts the static key (server-to-server)
   // or an unexpired signed session token. Header-only by default — query-string
   // keys leak via logs/proxies/referrer; set ALLOW_QUERY_KEY=1 to opt back in.
+  // Uses constant-time comparison to prevent timing-oracle attacks on the key.
   app.use('*', async (c, next) => {
     if (!env.QUERY_API_KEY) return next()
     const expected = env.QUERY_API_KEY.trim()
     const headerKey = (c.req.header('x-api-key') ?? '').trim()
     const queryKey = env.ALLOW_QUERY_KEY === '1' ? (c.req.query('api_key') ?? '').trim() : ''
     const provided = headerKey || queryKey
-    if (!provided) return c.json({ error: 'unauthorized' }, 401)
-    if (provided === expected) return next()
+    if (!provided) {
+      console.warn('[query-api] 401 missing key —', c.req.path)
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    if (await constantTimeEqual(provided, expected)) return next()
     if (await verifyToken(provided, expected)) return next()
+    console.warn('[query-api] 401 invalid key —', c.req.path)
     return c.json({ error: 'unauthorized' }, 401)
   })
 
@@ -115,9 +155,9 @@ function makeApp(env: Env) {
     const p = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
     const sessions = await db.getSessions(p.site, {
-      from:        c.req.query('from')  ? parseInt(c.req.query('from')!)  : undefined,
-      to:          c.req.query('to')    ? parseInt(c.req.query('to')!)    : undefined,
-      limit:       c.req.query('limit') ? parseInt(c.req.query('limit')!) : 100,
+      from:        parseTs(c.req.query('from')),
+      to:          parseTs(c.req.query('to')),
+      limit:       safeInt(c.req.query('limit'), 100, 1, 1000),
       hasReplay:   c.req.query('has_replay') === '1' || c.req.query('has_replay') === 'true',
       hasError:    c.req.query('has_error')  === '1' || c.req.query('has_error')  === 'true',
       urlContains: c.req.query('url') ?? undefined,
@@ -135,7 +175,9 @@ function makeApp(env: Env) {
 
   // ── Replay ────────────────────────────────────────────────────────────────
   app.get('/replay/:sid', async c => {
-    const events = await db.getReplayEvents(c.req.param('sid'))
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const events = await db.getReplayEvents(c.req.param('sid'), p.site)
     return c.json({ events })
   })
 
@@ -144,7 +186,7 @@ function makeApp(env: Env) {
     const p      = parseSite(c.req.query('site'))
     const status = c.req.query('status')
     const query  = c.req.query('query') ?? undefined
-    const limit  = c.req.query('limit') ? parseInt(c.req.query('limit')!) : 200
+    const limit  = safeInt(c.req.query('limit'), 200, 1, 1000)
     if (!p) return c.json({ error: 'site required' }, 400)
     const errors = await db.getErrorGroups(p.site, {
       status: status && VALID_STATUSES.has(status) ? status : undefined,
@@ -158,7 +200,7 @@ function makeApp(env: Env) {
     const fp  = c.req.param('fingerprint')
     const p   = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
-    const limit = c.req.query('limit') ? Math.min(parseInt(c.req.query('limit')!), 200) : 50
+    const limit = safeInt(c.req.query('limit'), 50, 1, 200)
     const activity = await db.getErrorActivity(p.site, fp, limit)
     return c.json({ activity, fingerprint: fp })
   })
@@ -167,7 +209,7 @@ function makeApp(env: Env) {
     const fp  = c.req.param('fingerprint')
     const p   = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
-    const limit = c.req.query('limit') ? Math.min(parseInt(c.req.query('limit')!), 100) : 25
+    const limit = safeInt(c.req.query('limit'), 25, 1, 100)
     const events = await db.getErrorEvents(p.site, fp, limit)
     return c.json({ events, fingerprint: fp })
   })
@@ -194,16 +236,19 @@ function makeApp(env: Env) {
   })
 
   // ── Audience: traffic / geo / devices ──────────────────────────────────────
-  const fromParam = (c: { req: { query: (k: string) => string | undefined } }) => {
-    const raw = c.req.query('from')
-    return raw ? parseInt(raw) : undefined
-  }
+  const fromParam = (c: { req: { query: (k: string) => string | undefined } }) =>
+    parseTs(c.req.query('from'))
 
   app.get('/traffic', async c => {
     const p = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
-    const rows = await db.getTrafficSources(p.site, fromParam(c))
-    return c.json({ sources: rows, meta: { site: p.site, total: rows.length } })
+    const from = fromParam(c)
+    const to   = parseTs(c.req.query('to'))
+    const [rows, series] = await Promise.all([
+      db.getTrafficSources(p.site, from, to),
+      db.getChannelSeries(p.site, from, to),
+    ])
+    return c.json({ sources: rows, series, meta: { site: p.site, total: rows.length } })
   })
 
   app.get('/geo', async c => {
@@ -218,6 +263,26 @@ function makeApp(env: Env) {
     if (!p) return c.json({ error: 'site required' }, 400)
     const rows = await db.getDeviceStats(p.site)
     return c.json({ devices: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/realtime', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ visitors: await db.getRealtimeVisitors(p.site), window: 300 })
+  })
+
+  app.get('/screen-stats', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getScreenStats(p.site)
+    return c.json({ screens: rows, meta: { site: p.site, total: rows.length } })
+  })
+
+  app.get('/pages', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const rows = await db.getTopPages(p.site, fromParam(c), parseTs(c.req.query('to')))
+    return c.json({ pages: rows, meta: { site: p.site, total: rows.length } })
   })
 
   app.get('/conversions', async c => {
@@ -236,6 +301,19 @@ function makeApp(env: Env) {
       db.getSiteTotals(),
     ])
     return c.json({ summary, sites })
+  })
+
+  app.get('/activity', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const days = safeInt(c.req.query('days'), 365, 1, 366)
+    return c.json({ days: await db.getActivity(p.site, days) })
+  })
+
+  app.get('/bots', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    return c.json({ bots: await db.getBots(p.site) })
   })
 
   // ── Funnels ─────────────────────────────────────────────────────────────────
@@ -296,8 +374,8 @@ function makeApp(env: Env) {
       if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
       const html = (await resp.text()).slice(0, 1_500_000)
       return c.json(auditHtml(html, resp.url || target.url))
-    } catch (e) {
-      return c.json({ error: `could not fetch page: ${e instanceof Error ? e.message : String(e)}` }, 502)
+    } catch {
+      return c.json({ error: 'could not fetch page: upstream connection failed' }, 502)
     }
   })
 
@@ -307,13 +385,20 @@ function makeApp(env: Env) {
     if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
     const strategy = c.req.query('strategy') === 'desktop' ? 'desktop' : 'mobile'
     const key = env.PAGESPEED_API_KEY ? `&key=${env.PAGESPEED_API_KEY}` : ''
-    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&category=performance${key}`
+    const cats = 'category=performance&category=accessibility&category=seo&category=best-practices'
+    const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&${cats}${key}`
     try {
       const r = await fetch(psi)
-      const data = await r.json() as { lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, { displayValue?: string; numericValue?: number }> }; error?: { message?: string } }
+      const data = await r.json() as {
+        lighthouseResult?: {
+          categories?: { performance?: { score?: number }; accessibility?: { score?: number }; seo?: { score?: number }; 'best-practices'?: { score?: number } }
+          audits?: Record<string, { displayValue?: string; numericValue?: number }>
+        }
+        error?: { message?: string }
+      }
       if (data.error) return c.json({ error: data.error.message ?? 'PageSpeed error' }, 502)
       const lr = data.lighthouseResult
-      const score = Math.round((lr?.categories?.performance?.score ?? 0) * 100)
+      const sc = (k: string) => Math.round(((lr?.categories as Record<string, { score?: number } | undefined> | undefined)?.[k]?.score ?? 0) * 100)
       const pick = (id: string, label: string) => {
         const a = lr?.audits?.[id]
         return { id, label, display: a?.displayValue ?? '—', numeric: a?.numericValue ?? null }
@@ -326,9 +411,17 @@ function makeApp(env: Env) {
         pick('speed-index', 'Speed Index'),
         pick('interactive', 'Time to Interactive'),
       ]
-      return c.json({ url: target.url, strategy, score, metrics })
-    } catch (e) {
-      return c.json({ error: `PageSpeed request failed: ${e instanceof Error ? e.message : String(e)}` }, 502)
+      return c.json({
+        url: target.url, strategy, score: sc('performance'), metrics,
+        categories: {
+          performance:    sc('performance'),
+          accessibility:  sc('accessibility'),
+          seo:            sc('seo'),
+          bestPractices:  sc('best-practices'),
+        },
+      })
+    } catch {
+      return c.json({ error: 'PageSpeed request failed: upstream connection error' }, 502)
     }
   })
 
@@ -394,11 +487,11 @@ function makeApp(env: Env) {
       channels: {
         telegram: {
           configured: !!(row?.telegramToken && row?.telegramChatId),
-          chatId:     row?.telegramChatId ?? null,
+          // chatId is not secret but has no UI use; return only configured status
         },
         slack: {
           configured: !!row?.slackWebhookUrl,
-          webhookUrl: row?.slackWebhookUrl ?? null,
+          // webhookUrl is a credential — never returned to the client
         },
       },
       meta: { site: p.site },
@@ -438,9 +531,9 @@ function makeApp(env: Env) {
     const p = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
     const items = await db.getFeedback(p.site, {
-      from:  c.req.query('from')  ? parseInt(c.req.query('from')!)  : undefined,
-      to:    c.req.query('to')    ? parseInt(c.req.query('to')!)    : undefined,
-      limit: c.req.query('limit') ? parseInt(c.req.query('limit')!) : 100,
+      from:  parseTs(c.req.query('from')),
+      to:    parseTs(c.req.query('to')),
+      limit: safeInt(c.req.query('limit'), 100, 1, 1000),
     })
     return c.json({ items, meta: { site: p.site, total: items.length } })
   })
@@ -509,9 +602,10 @@ function makeApp(env: Env) {
   app.post('/cron/checkin', async c => {
     const monitor = c.req.query('monitor') ?? ''
     const p       = parseSite(c.req.query('site'))
-    const interval = parseInt(c.req.query('interval') ?? '300000')
-    const grace    = parseInt(c.req.query('grace')    ?? '60000')
     if (!monitor || !p) return c.json({ error: 'monitor and site are required' }, 400)
+    if (!MONITOR_RE.test(monitor)) return c.json({ error: 'monitor: alphanumeric, -, _, . only (max 100 chars)' }, 400)
+    const interval = safeInt(c.req.query('interval'), 300_000, 60_000,  86_400_000)
+    const grace    = safeInt(c.req.query('grace'),     60_000,  5_000,   3_600_000)
     await db.upsertCronCheckin(monitor, p.site, interval, grace)
     return c.json({ ok: true, monitor, checkin: Date.now() })
   })

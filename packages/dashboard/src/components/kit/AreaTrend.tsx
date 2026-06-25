@@ -1,11 +1,11 @@
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Brush, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-export interface TrendPoint { label: string; value: number; value2?: number }
+export interface TrendPoint { label: string; [key: string]: number | string | undefined }
 
 interface Props {
   data: TrendPoint[]
   height?: number
-  series?: { key: 'value' | 'value2'; name: string; color: string }[]
+  series?: { key: string; name: string; color: string }[]
 }
 
 export function AreaTrend({ data, height = 260, series }: Props) {
@@ -38,6 +38,11 @@ export function AreaTrend({ data, height = 260, series }: Props) {
             dot={false} activeDot={{ r: 4 }} isAnimationActive={false}
           />
         ))}
+        {data.length > 30 && (
+          <Brush dataKey="label" height={20} stroke="hsl(var(--border))" fill="hsl(var(--background))"
+            travellerWidth={6} gap={1}
+          />
+        )}
       </AreaChart>
     </ResponsiveContainer>
   )

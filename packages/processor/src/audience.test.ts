@@ -24,11 +24,11 @@ describe('referrer classification', () => {
 
 describe('parseUTM', () => {
   it('extracts utm params', () => {
-    expect(parseUTM('https://app.io/?utm_source=newsletter&utm_medium=email&utm_campaign=spring')).toEqual({
-      source: 'newsletter', medium: 'email', campaign: 'spring',
+    expect(parseUTM('https://app.io/?utm_source=newsletter&utm_medium=email&utm_campaign=spring&utm_content=banner&utm_term=shoes')).toEqual({
+      source: 'newsletter', medium: 'email', campaign: 'spring', content: 'banner', term: 'shoes',
     })
   })
-  it('empty when none', () => expect(parseUTM('https://app.io/')).toEqual({ source: '', medium: '', campaign: '' }))
+  it('empty when none', () => expect(parseUTM('https://app.io/')).toEqual({ source: '', medium: '', campaign: '', content: '', term: '' }))
 })
 
 describe('buildTrafficSources', () => {

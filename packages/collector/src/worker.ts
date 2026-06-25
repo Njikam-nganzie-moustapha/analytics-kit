@@ -68,6 +68,19 @@ function isFiltered(e: AnalyticsEvent): boolean {
   return isExtURL(url)
 }
 
+// ── Constant-time key check ───────────────────────────────────────────────────
+// Checks all keys even after a match to avoid leaking key position via timing.
+const _enc = new TextEncoder()
+async function hasKeySafe(keys: Set<string>, provided: string): Promise<boolean> {
+  const ck = await crypto.subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+  const mac = await crypto.subtle.sign('HMAC', ck, _enc.encode(provided))
+  let found = false
+  for (const k of keys) {
+    if (await crypto.subtle.verify('HMAC', ck, mac, _enc.encode(k))) found = true
+  }
+  return found
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 const app = new Hono<{ Bindings: Env }>()
@@ -78,6 +91,7 @@ const securityHeaders: MiddlewareHandler = async (c, next) => {
   c.header('X-Frame-Options', 'DENY')
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Cross-Origin-Resource-Policy', 'cross-origin')
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   c.header('Cache-Control', 'no-store')
   c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
 }
@@ -112,10 +126,10 @@ app.post('/e', async c => {
   const ua = c.req.header('user-agent') ?? ''
   if (isBotUA(ua)) return c.body(null, 204)
 
-  // Auth
+  // Auth — constant-time comparison to prevent timing-oracle on site keys
   const keys = new Set(c.env.SITE_KEYS.split(',').map(k => k.trim()).filter(Boolean))
   const key  = c.req.header('x-site-key') ?? c.req.query('sk') ?? ''
-  if (keys.size > 0 && !keys.has(key)) return c.json({ error: 'unauthorized' }, 401)
+  if (keys.size > 0 && !await hasKeySafe(keys, key)) return c.json({ error: 'unauthorized' }, 401)
 
   try {
     const body = await c.req.json()
@@ -141,6 +155,39 @@ app.post('/e', async c => {
 
     const storage = new TursoAdapter({ url: c.env.TURSO_URL, token: c.env.TURSO_TOKEN })
     await storage.write(events)
+    return c.body(null, 204)
+  } catch {
+    return c.json({ error: 'bad_request' }, 400)
+  }
+})
+
+// Server-side AI-crawler beacon. Crawlers (GPTBot, ClaudeBot, PerplexityBot…) never
+// run our JS tracker, so they're invisible to /e. The origin server (LIA backend)
+// detects the crawler UA and POSTs here. NOT request-UA bot-filtered — the request
+// comes from the trusted origin, and the crawler UA lives in the body.
+app.post('/bot', async c => {
+  const keys = new Set(c.env.SITE_KEYS.split(',').map(k => k.trim()).filter(Boolean))
+  const key  = c.req.header('x-site-key') ?? c.req.query('sk') ?? ''
+  if (keys.size > 0 && !await hasKeySafe(keys, key)) return c.json({ error: 'unauthorized' }, 401)
+
+  try {
+    const body = await c.req.json() as Record<string, unknown>
+    const site = typeof body.site === 'string' ? body.site : ''
+    const bot  = typeof body.bot  === 'string' ? body.bot.slice(0, 60) : ''
+    if (!site || !bot) return c.json({ error: 'site_and_bot_required' }, 400)
+
+    const event = {
+      t:    Date.now(),
+      sid:  'bot',
+      site,
+      type: 'bot_hit',
+      bot,
+      ua:   typeof body.ua  === 'string' ? body.ua.slice(0, 300) : '',
+      url:  typeof body.url === 'string' ? body.url.slice(0, 300) : '',
+      geo:  edgeGeo(c),
+    }
+    const storage = new TursoAdapter({ url: c.env.TURSO_URL, token: c.env.TURSO_TOKEN })
+    await storage.write([event])
     return c.body(null, 204)
   } catch {
     return c.json({ error: 'bad_request' }, 400)

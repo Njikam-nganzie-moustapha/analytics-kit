@@ -1,6 +1,9 @@
 name = "analytics-collector-lia"
 main = "src/worker.ts"
 compatibility_date = "2024-09-23"
+# Minify the deployed Worker bundle — removes identifiers, comments, whitespace.
+# The deployed JS on Cloudflare is unreadable without source maps.
+minify = true
 
 [vars]
 CORS_ORIGINS = "*"

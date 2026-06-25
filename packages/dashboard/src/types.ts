@@ -149,12 +149,17 @@ export type Channel = 'direct' | 'organic' | 'social' | 'referral' | 'ai'
 export interface TrafficSource {
   site: string; channel: Channel; referrerHost: string
   utmSource: string; utmMedium: string; utmCampaign: string
+  utmContent: string; utmTerm: string
   sessions: number; lastSeen: number
 }
 
 export interface GeoStat { site: string; country: string; city: string; sessions: number }
 
 export interface DeviceStat { site: string; deviceType: string; browser: string; os: string; sessions: number }
+
+export interface ScreenStat { site: string; resolution: string; sessions: number }
+
+export interface BotStat { site: string; bot: string; category: string; hits: number; lastSeen: number }
 
 export interface ConversionStat { site: string; kind: string; url: string; count: number; lastSeen: number }
 
@@ -169,9 +174,20 @@ export interface OverviewSummary {
   perfP75: number
   health: number
   series: { day: number; sessions: number; errors: number }[]
+  // New KPIs:
+  pageviews: number
+  bounceRate: number         // 0–100
+  avgDuration: number        // ms
+  // Previous period (used for delta ▲▼ badges):
+  prevSessions: number
+  prevUsers: number
+  prevConversions: number
+  prevErrorRate: number      // 0–100
 }
 
 export interface SiteTotal { site: string; sessions: number; lastSeen: number }
+
+export interface ActivityDay { day: string; sessions: number }
 
 export interface FunnelStep { label: string; type: 'url' | 'event'; match: string }
 export interface FunnelDef { id: string; site: string; name: string; steps: FunnelStep[]; updated: number }
@@ -181,6 +197,16 @@ export interface SeoCheck { id: string; label: string; status: 'pass' | 'warn' |
 export interface SeoReport { url: string; score: number; title: string | null; description: string | null; checks: SeoCheck[] }
 
 export interface PsMetric { id: string; label: string; display: string; numeric: number | null }
-export interface PageSpeedResult { url: string; strategy: string; score: number; metrics: PsMetric[] }
+export interface PageSpeedResult {
+  url: string
+  strategy: string
+  score: number
+  metrics: PsMetric[]
+  categories?: { performance: number; accessibility: number; seo: number; bestPractices: number }
+}
 
 export interface Branding { site: string; productName: string | null; logoUrl: string | null; primary: string | null; updated: number }
+
+export interface PageRow { url: string; views: number; entries: number; exits: number; bounceRate: number; avgDuration: number }
+
+export interface ChannelSeriesPoint { day: number; channel: string; sessions: number }

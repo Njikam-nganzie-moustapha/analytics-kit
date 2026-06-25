@@ -12,6 +12,10 @@ export interface RawEvent {
   y?: number
   vpW?: number
   vpH?: number
+  vw?: number
+  vh?: number
+  device?: string
+  el?: string
   zoneId?: string
   dwellMs?: number
   breadcrumbs?: Breadcrumb[]
@@ -30,6 +34,14 @@ export interface HeatmapCell {
   url: string
   gx: number
   gy: number
+  count: number
+}
+
+export interface ClickElementRow {
+  site: string
+  url: string
+  el: string
+  device: string
   count: number
 }
 
@@ -54,6 +66,8 @@ export interface SessionStat {
   eventCount: number
   hasReplay: boolean
   hasError: boolean
+  entryUrl: string
+  exitUrl: string
 }
 
 export interface UserSample {
@@ -103,8 +117,11 @@ export interface TrafficRow {
   utmSource: string
   utmMedium: string
   utmCampaign: string
+  utmContent: string
+  utmTerm: string
   sessions: number
   lastSeen: number
+  day: number  // epoch day = Math.floor(ts / 86_400_000)
 }
 
 export interface GeoRow {
@@ -120,6 +137,12 @@ export interface DeviceRow {
   deviceType: string
   browser: string
   os: string
+  sessions: number
+}
+
+export interface ScreenRow {
+  site: string
+  resolution: string   // e.g. "1920×1080"
   sessions: number
 }
 

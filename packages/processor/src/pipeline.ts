@@ -1,5 +1,5 @@
 import { ProcessorTurso } from './turso'
-import { buildHeatmapCells } from './heatmap'
+import { buildHeatmapCells, buildClickElements } from './heatmap'
 import { buildZoneStats } from './zones'
 import { buildSessionStats } from './sessions'
 import { buildErrorGroups } from './errors'
@@ -7,8 +7,9 @@ import { buildVitalsBuckets } from './vitals'
 import { buildPagePerf } from './perf'
 import { buildTrafficSources } from './traffic'
 import { buildGeoStats } from './geo'
-import { buildDeviceStats } from './devices'
+import { buildDeviceStats, buildScreenStats } from './devices'
 import { buildConversions } from './conversions'
+import { buildBotStats } from './botstats'
 import { createConsumer, symbolicateStack, type SourceMapConsumer } from './symbolicate'
 import { checkAlerts } from './alerts'
 
@@ -34,7 +35,8 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
 
     const maxT = Math.max(...events.map(e => e.t))
 
-    const heatmapCells  = buildHeatmapCells(events)
+    const heatmapCells    = buildHeatmapCells(events)
+    const clickElements   = buildClickElements(events)
     const zoneStats     = buildZoneStats(events)
     const sessionStats  = buildSessionStats(events)
     const errorGroups   = buildErrorGroups(events)
@@ -43,7 +45,9 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
     const trafficRows   = buildTrafficSources(events)
     const geoRows       = buildGeoStats(events)
     const deviceRows    = buildDeviceStats(events)
+    const screenRows    = buildScreenStats(events)
     const conversionRows = buildConversions(events)
+    const botRows        = buildBotStats(events)
 
     const feedback = events
       .filter(e => e.type === 'user_feedback' && typeof e.message === 'string' && e.message.trim())
@@ -60,6 +64,7 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
 
     await Promise.allSettled([
       db.upsertHeatmapCells(heatmapCells),
+      db.upsertClickElements(clickElements),
       db.upsertZoneStats(zoneStats),
       db.upsertSessions(sessionStats),
       db.upsertErrorGroups(errorGroups),
@@ -68,13 +73,16 @@ export async function runPipeline(db: ProcessorTurso): Promise<void> {
       db.upsertPagePerf(pagePerf),
       db.insertFeedback(feedback),
       db.upsertTrafficSources(trafficRows),
+      db.upsertTrafficSourcesDaily(trafficRows),
       db.upsertGeoStats(geoRows),
       db.upsertDeviceStats(deviceRows),
+      db.upsertScreenStats(screenRows),
       db.upsertConversions(conversionRows),
+      db.upsertBotStats(botRows),
     ]).then(results => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          const names = ['heatmap', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf', 'feedback', 'traffic', 'geo', 'devices', 'conversions']
+          const names = ['heatmap', 'click_elements', 'zones', 'sessions', 'errors', 'vitals', 'error_daily', 'perf', 'feedback', 'traffic', 'traffic_daily', 'geo', 'devices', 'screens', 'conversions', 'bots']
           console.error(`[processor] ${site} ${names[i]} upsert failed:`, r.reason)
         }
       })

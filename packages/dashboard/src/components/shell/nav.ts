@@ -1,14 +1,14 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard, Share2, Globe, MonitorSmartphone, MousePointerClick,
-  Film, Filter, Gauge, Bug, Tag, Map as MapIcon, Target, Clock, Bell, MessageSquare,
-  Search, Zap, Palette,
+  Film, Filter, FileText, Gauge, Bug, Tag, Map as MapIcon, Target, Clock, Bell, MessageSquare,
+  Search, Zap, Palette, Bot,
 } from 'lucide-react'
 
 export type View =
   | 'overview'
-  | 'traffic' | 'geo' | 'devices'
-  | 'behavior' | 'sessions' | 'funnels'
+  | 'traffic' | 'geo' | 'devices' | 'bots'
+  | 'behavior' | 'sessions' | 'funnels' | 'pages'
   | 'performance' | 'seo' | 'pagespeed'
   | 'errors' | 'releases' | 'sourcemaps'
   | 'conversions'
@@ -25,10 +25,12 @@ export const NAV: NavGroup[] = [
     { id: 'traffic', label: 'Traffic sources', icon: Share2 },
     { id: 'geo', label: 'Geography', icon: Globe },
     { id: 'devices', label: 'Devices', icon: MonitorSmartphone },
+    { id: 'bots', label: 'AI crawlers', icon: Bot },
   ] },
   { label: 'Behavior', items: [
     { id: 'behavior', label: 'Heatmap & Zones', icon: MousePointerClick },
     { id: 'sessions', label: 'Sessions', icon: Film },
+    { id: 'pages', label: 'Pages', icon: FileText },
     { id: 'funnels', label: 'Funnels', icon: Filter },
   ] },
   { label: 'Performance', items: [

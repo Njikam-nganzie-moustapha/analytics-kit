@@ -30,11 +30,17 @@ export function parseAuditUrl(raw: string | undefined): { url: string } | null {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
   const host = u.hostname.toLowerCase()
   if (
-    host === 'localhost' || host === '0.0.0.0' || host.endsWith('.local') ||
+    host === 'localhost' || host === '0.0.0.0' || host === '0' || host.endsWith('.local') ||
     /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
     /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     host === '[::1]' || host.startsWith('[fc') || host.startsWith('[fd')
   ) return null
+  // Decimal integer IP notation bypass (e.g. 2130706433 = 0x7f000001 = 127.0.0.1)
+  if (/^\d+$/.test(host)) return null
+  // IPv6-mapped IPv4 bypass (e.g. [::ffff:127.0.0.1], [::ffff:7f00:1])
+  if (host.startsWith('[::ffff:') || host.startsWith('[0:0:0:0:0:ffff:')) return null
+  // Cloud metadata service hostnames
+  if (host === 'metadata.google.internal' || host === 'metadata.google') return null
   return { url: u.toString() }
 }
 

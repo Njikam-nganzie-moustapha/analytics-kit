@@ -21,5 +21,18 @@ export function heatmapRouter(db: QueryTurso) {
     return c.json({ cells: normalize(cells), meta: { site, url: url ?? null, total: cells.length } })
   })
 
+  // Top clicked elements per page, optionally filtered by device
+  r.get('/elements', async c => {
+    const parsed = parseSite(c.req.query('site'))
+    if (!parsed) return c.json({ error: 'site is required and must be a valid site ID (a-z, 0-9, -, _, .)' }, 400)
+    const { site } = parsed
+
+    const url    = c.req.query('url')
+    const device = c.req.query('device')
+    const validDevice = device === 'mobile' || device === 'desktop' ? device : undefined
+    const elements = await db.getClickElements(site, url, validDevice)
+    return c.json({ elements, meta: { site, url: url ?? null, device: validDevice ?? 'all' } })
+  })
+
   return r
 }

@@ -21,7 +21,8 @@ export function buildTrafficSources(events: RawEvent[]): TrafficRow[] {
     const channel = classifyReferrer(referrer, selfHost)
     const referrerHost = hostOf(referrer)
     const utm = parseUTM(typeof e.url === 'string' ? e.url : undefined)
-    const key = `${e.site}|${channel}|${referrerHost}|${utm.source}|${utm.medium}|${utm.campaign}`
+    const day = Math.floor(e.t / 86_400_000)
+    const key = `${e.site}|${channel}|${referrerHost}|${utm.source}|${utm.medium}|${utm.campaign}|${day}`
     const row = agg.get(key)
     if (row) {
       row.sessions += 1
@@ -34,8 +35,11 @@ export function buildTrafficSources(events: RawEvent[]): TrafficRow[] {
         utmSource: utm.source,
         utmMedium: utm.medium,
         utmCampaign: utm.campaign,
+        utmContent: utm.content,
+        utmTerm: utm.term,
         sessions: 1,
         lastSeen: e.t,
+        day,
       })
     }
   }

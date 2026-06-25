@@ -9,6 +9,12 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  // Strip console.log + debugger statements from the production bundle.
+  // legalComments: 'none' prevents lib names from leaking via license banners.
+  esbuild: {
+    drop: ['console', 'debugger'],
+    legalComments: 'none',
+  },
   server: {
     port: 4212,
     proxy: {
@@ -18,6 +24,8 @@ export default defineConfig({
   },
   preview: { port: 4213 },
   build: {
+    // Explicit: no .map files shipped to Vercel — minified bundle is the only artifact.
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {

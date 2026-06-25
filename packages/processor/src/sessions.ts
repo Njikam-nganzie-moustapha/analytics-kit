@@ -21,6 +21,12 @@ export function buildSessionStats(events: RawEvent[]): SessionStat[] {
     const urls = new Set<string>()
     for (const e of evs) { if (e.url) urls.add(String(e.url)) }
 
+    // Entry = first pageview URL; exit = last pageview URL
+    const pageviews = evs.filter(e => e.type === 'pageview' && typeof e.url === 'string')
+    const pageviewsSorted = [...pageviews].sort((a, b) => a.t - b.t)
+    const entryUrl = pageviewsSorted[0]?.url ? String(pageviewsSorted[0].url) : ''
+    const exitUrl  = pageviewsSorted[pageviewsSorted.length - 1]?.url ? String(pageviewsSorted[pageviewsSorted.length - 1].url) : entryUrl
+
     const endEv = evs.find(e => e.type === 'session_end')
     const duration = endEv && typeof endEv.duration === 'number'
       ? endEv.duration
@@ -37,6 +43,8 @@ export function buildSessionStats(events: RawEvent[]): SessionStat[] {
       eventCount: evs.length,
       hasReplay:  evs.some(e => e.type === 'rrweb_chunk'),
       hasError:   evs.some(e => e.type === 'js_error' || e.type === 'network_error'),
+      entryUrl,
+      exitUrl,
     })
   }
 
