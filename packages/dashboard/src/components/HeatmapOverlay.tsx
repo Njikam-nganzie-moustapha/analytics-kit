@@ -34,17 +34,29 @@ export function HeatmapOverlay({ cells }: Props) {
 
     if (cells.length === 0) return
 
+    // The query-api returns raw `count` without a normalised `intensity`. Derive a
+    // safe 0–1 intensity from count (relative to the busiest cell) and fall back to
+    // it whenever `intensity` is missing/NaN — otherwise the colour maths produces
+    // `hsla(NaN,…)` and addColorStop throws, blanking the whole heatmap.
+    const maxCount = Math.max(1, ...cells.map(c => (typeof c.count === 'number' ? c.count : 0)))
+    const intensityOf = (c: HeatmapCell): number => {
+      const i = c.intensity
+      const v = typeof i === 'number' && !isNaN(i) ? i : (typeof c.count === 'number' ? c.count / maxCount : 0)
+      return Math.min(1, Math.max(0, v))
+    }
+
     // Draw cells sorted low→high so hot spots render on top
-    const sorted = [...cells].sort((a, b) => a.intensity - b.intensity)
+    const sorted = [...cells].sort((a, b) => intensityOf(a) - intensityOf(b))
 
     for (const cell of sorted) {
       const cx     = cell.gx * CELL_PX + CELL_PX / 2
       const cy     = cell.gy * CELL_PX + CELL_PX / 2
       const radius = CELL_PX * 3
 
+      const intensity = intensityOf(cell)
       // HSL hue: 0=red (hot) … 240=blue (cold), alpha scales with intensity
-      const hue   = (1 - cell.intensity) * 240
-      const alpha = 0.08 + cell.intensity * 0.65
+      const hue   = (1 - intensity) * 240
+      const alpha = 0.08 + intensity * 0.65
 
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
       grad.addColorStop(0,   `hsla(${hue}, 100%, 45%, ${alpha})`)
