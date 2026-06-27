@@ -161,6 +161,8 @@ export interface ScreenStat { site: string; resolution: string; sessions: number
 
 export interface BotStat { site: string; bot: string; category: string; hits: number; lastSeen: number }
 
+export interface ClickElement { site: string; url: string; el: string; device: string; count: number }
+
 export interface ConversionStat { site: string; kind: string; url: string; count: number; lastSeen: number }
 
 export interface OverviewSummary {
