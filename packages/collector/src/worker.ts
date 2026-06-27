@@ -3,6 +3,8 @@ import { cors } from 'hono/cors'
 import type { MiddlewareHandler } from 'hono'
 import { TursoAdapter } from '../../storage/src/turso'
 import type { AnalyticsEvent, GeoInfo } from '../../storage/src/types'
+import { honeypotsMiddleware } from '../../security/src/honeypots'
+import { threatDetector } from '../../security/src/threatDetector'
 
 interface Env {
   TURSO_URL:    string
@@ -11,6 +13,8 @@ interface Env {
   CORS_ORIGINS?: string
   ERROR_FP_MAX_PER_WINDOW?: string
   ERROR_FP_WINDOW_MS?:      string
+  TELEGRAM_BOT_TOKEN?: string
+  TELEGRAM_CHAT_ID?:   string
 }
 
 // ── Bot filter ────────────────────────────────────────────────────────────────
@@ -108,6 +112,9 @@ app.use('*', async (c, next) => {
   })(c, next)
 })
 
+app.use('*', honeypotsMiddleware)
+app.use('*', threatDetector)
+
 // Geo from the Cloudflare edge — country/city/region only, never the raw IP
 // (keeps the GDPR-friendly posture). Attached to each event's payload so the
 // processor can aggregate audience geography without any IP storage.
@@ -193,5 +200,7 @@ app.post('/bot', async c => {
     return c.json({ error: 'bad_request' }, 400)
   }
 })
+
+app.notFound(c => c.json({ message: 'Not found' }, 404))
 
 export default app

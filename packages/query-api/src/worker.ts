@@ -5,6 +5,9 @@ import { QueryTurso } from './turso'
 import { parseSite, parseRelease, parseFilename, parseSteps, parseAuditUrl } from './validate'
 import { signToken, verifyToken, constantTimeEqual } from './token'
 import { auditHtml } from './seo'
+import { honeypotsMiddleware } from '../../security/src/honeypots'
+import { threatDetector } from '../../security/src/threatDetector'
+import { secureFetch } from '../../security/src/secureFetch'
 
 const HSL_RE = /^\d{1,3} \d{1,3}% \d{1,3}%$/
 
@@ -16,6 +19,8 @@ interface Env {
   CORS_ORIGINS?:      string
   ALLOW_QUERY_KEY?:   string // set to '1' to also accept ?api_key= (legacy); default header-only
   PAGESPEED_API_KEY?: string // optional Google PageSpeed Insights key (higher quota)
+  TELEGRAM_BOT_TOKEN?: string
+  TELEGRAM_CHAT_ID?:   string
 }
 
 const securityHeaders: MiddlewareHandler = async (c, next) => {
@@ -74,6 +79,7 @@ function makeApp(env: Env) {
   app.use('*', securityHeaders)
 
   const origins = env.CORS_ORIGINS?.split(',').map(s => s.trim()) ?? ['*']
+
   if (origins.length === 1 && origins[0] === '*' && !warnedCors) {
     warnedCors = true
     console.warn('[query-api] CORS_ORIGINS not set — wildcard CORS active. Set it to the dashboard origin in production.')
@@ -84,6 +90,9 @@ function makeApp(env: Env) {
     allowHeaders: ['content-type', 'x-api-key'],
     maxAge: 600,
   }))
+
+  app.use('*', honeypotsMiddleware)
+  app.use('*', threatDetector)
 
   // Lazy schema ensure (once per isolate)
   app.use('*', async (_c, next) => {
@@ -148,6 +157,15 @@ function makeApp(env: Env) {
     const p = parseSite(c.req.query('site'))
     if (!p) return c.json({ error: 'site required' }, 400)
     return c.json(await db.getZoneStats(p.site, c.req.query('url')))
+  })
+
+  // ── Click elements (what was actually clicked — label × device) ────────────
+  app.get('/click-elements', async c => {
+    const p = parseSite(c.req.query('site'))
+    if (!p) return c.json({ error: 'site required' }, 400)
+    const dev = c.req.query('device')
+    const elements = await db.getClickElements(p.site, c.req.query('url'), dev === 'mobile' || dev === 'desktop' ? dev : undefined)
+    return c.json({ elements })
   })
 
   // ── Sessions ─────────────────────────────────────────────────────────────
@@ -367,10 +385,7 @@ function makeApp(env: Env) {
     const target = parseAuditUrl(c.req.query('url'))
     if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
     try {
-      const resp = await fetch(target.url, {
-        headers: { 'user-agent': 'analytics-kit-seo/1.0 (+https://analytics-kit)' },
-        redirect: 'follow',
-      })
+      const resp = await secureFetch(target.url, { redirect: 'follow' })
       if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
       const html = (await resp.text()).slice(0, 1_500_000)
       return c.json(auditHtml(html, resp.url || target.url))
@@ -388,7 +403,7 @@ function makeApp(env: Env) {
     const cats = 'category=performance&category=accessibility&category=seo&category=best-practices'
     const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&${cats}${key}`
     try {
-      const r = await fetch(psi)
+      const r = await secureFetch(psi)
       const data = await r.json() as {
         lighthouseResult?: {
           categories?: { performance?: { score?: number }; accessibility?: { score?: number }; seo?: { score?: number }; 'best-practices'?: { score?: number } }
@@ -618,6 +633,7 @@ function makeApp(env: Env) {
     return c.json({ ok: true })
   })
 
+  app.notFound(c => c.json({ message: 'Not found' }, 404))
   return app
 }
 

@@ -1,4 +1,4 @@
-import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ScreenStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding, PageRow, ActivityDay, ChannelSeriesPoint, BotStat } from './types'
+import type { HeatmapCell, ZoneRow, SessionRow, ErrorGroup, CronMonitor, VitalRow, ErrorOccurrence, UserSample, ErrorActivity, ReleaseRow, PerfRow, FeedbackItem, AlertRule, AlertChannels, TrafficSource, GeoStat, DeviceStat, ScreenStat, ConversionStat, OverviewSummary, SiteTotal, FunnelDef, FunnelStep, FunnelResult, SeoReport, PageSpeedResult, Branding, PageRow, ActivityDay, ChannelSeriesPoint, BotStat, ClickElement } from './types'
 
 const BASE = ((import.meta.env.VITE_QUERY_API_URL as string | undefined) ?? 'http://localhost:4211').replace(/^﻿/, '').trim()
 const TOKEN_KEY = 'analyticskit_token'
@@ -70,6 +70,15 @@ export async function fetchZones(site: string, url?: string): Promise<ZoneRow[]>
   const res  = await apiFetch(`${BASE}/zones?${q}`, { headers: hdrs() })
   const data = await res.json() as { zones: ZoneRow[] }
   return data.zones ?? []
+}
+
+export async function fetchClickElements(site: string, url?: string, device?: string): Promise<ClickElement[]> {
+  const q = new URLSearchParams({ site })
+  if (url) q.set('url', url)
+  if (device && device !== 'all') q.set('device', device)
+  const res  = await apiFetch(`${BASE}/click-elements?${q}`, { headers: hdrs() })
+  const data = await res.json() as { elements: ClickElement[] }
+  return data.elements ?? []
 }
 
 export async function fetchSessions(

@@ -14,6 +14,9 @@ import { sitesRouter      } from './routes/sites'
 import { parseSite, parseSteps, parseAuditUrl } from './validate'
 import { auditHtml } from './seo'
 import type { QueryTurso } from './turso'
+import { honeypotsMiddleware } from '../../security/src/honeypots'
+import { threatDetector } from '../../security/src/threatDetector'
+import { secureFetch } from '../../security/src/secureFetch'
 
 const HSL_RE = /^\d{1,3} \d{1,3}% \d{1,3}%$/
 
@@ -49,6 +52,9 @@ export function createApp(db: QueryTurso) {
     maxAge: 600,
   }))
 
+  app.use('*', honeypotsMiddleware)
+  app.use('*', threatDetector)
+
   app.get('/health', c => c.json({ ok: true }))
   app.route('/auth', authRouter())
   app.route('/sites', sitesRouter(db))
@@ -57,6 +63,12 @@ export function createApp(db: QueryTurso) {
 
   app.route('/heatmap',  heatmapRouter(db))
   app.route('/zones',    zonesRouter(db))
+  app.get('/click-elements', async c => {
+    const p = parseSite(c.req.query('site')); if (!p) return c.json({ error: 'site required' }, 400)
+    const dev = c.req.query('device')
+    const elements = await db.getClickElements(p.site, c.req.query('url'), dev === 'mobile' || dev === 'desktop' ? dev : undefined)
+    return c.json({ elements })
+  })
   app.route('/sessions', sessionsRouter(db))
   app.route('/replay',   replayRouter(db))
   app.route('/errors',     errorsRouter(db))
@@ -161,7 +173,7 @@ export function createApp(db: QueryTurso) {
     const target = parseAuditUrl(c.req.query('url'))
     if (!target) return c.json({ error: 'a valid public http(s) url is required' }, 400)
     try {
-      const resp = await fetch(target.url, { headers: { 'user-agent': 'analytics-kit-seo/1.0' }, redirect: 'follow' })
+      const resp = await secureFetch(target.url, { redirect: 'follow' })
       if (!resp.ok) return c.json({ error: `fetch failed: HTTP ${resp.status}` }, 502)
       const html = (await resp.text()).slice(0, 1_500_000)
       return c.json(auditHtml(html, resp.url || target.url))
@@ -176,7 +188,7 @@ export function createApp(db: QueryTurso) {
     const cats = 'category=performance&category=accessibility&category=seo&category=best-practices'
     const psi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(target.url)}&strategy=${strategy}&${cats}${key}`
     try {
-      const r = await fetch(psi)
+      const r = await secureFetch(psi)
       const data = await r.json() as {
         lighthouseResult?: {
           categories?: { performance?: { score?: number }; accessibility?: { score?: number }; seo?: { score?: number }; 'best-practices'?: { score?: number } }
@@ -232,5 +244,6 @@ export function createApp(db: QueryTurso) {
     return c.json({ ok: true })
   })
 
+  app.notFound(c => c.json({ message: 'Not found' }, 404))
   return app
 }

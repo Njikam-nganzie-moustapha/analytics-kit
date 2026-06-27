@@ -5,6 +5,8 @@ import type { MiddlewareHandler } from 'hono'
 import type { StorageAdapter } from '@analytics-kit/storage'
 import { MemoryQueue } from './queue/memory'
 import { eventsRouter } from './routes/events'
+import { honeypotsMiddleware } from '../../security/src/honeypots'
+import { threatDetector } from '../../security/src/threatDetector'
 
 const BODY_LIMIT = parseInt(process.env.BODY_LIMIT_BYTES ?? String(256 * 1024)) // 256 KB default
 
@@ -42,6 +44,8 @@ export function createApp(storage: StorageAdapter) {
     allowHeaders: ['Content-Type', 'X-Site-Key', 'X-Compressed'],
     maxAge: 86400,
   }))
+  app.use('*', honeypotsMiddleware)
+  app.use('*', threatDetector)
   app.use('/e/*', bodyLimit({
     maxSize: BODY_LIMIT,
     onError: c => c.json({ error: 'payload_too_large' }, 413),
@@ -49,6 +53,7 @@ export function createApp(storage: StorageAdapter) {
 
   app.get('/health', c => c.json({ ok: true, ts: Date.now(), queued: queue.size() }))
   app.route('/e', eventsRouter(queue))
+  app.notFound(c => c.json({ message: 'Not found' }, 404))
 
   // Graceful shutdown — flush remaining events before exit
   const shutdown = async () => {

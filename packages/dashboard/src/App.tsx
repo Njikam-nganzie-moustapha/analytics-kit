@@ -23,6 +23,7 @@ const TrafficView      = lazy(() => import('./components/audience/TrafficView').
 const GeoView          = lazy(() => import('./components/audience/GeoView').then(m => ({ default: m.GeoView })))
 const DevicesView      = lazy(() => import('./components/audience/DevicesView').then(m => ({ default: m.DevicesView })))
 const BotsView         = lazy(() => import('./components/audience/BotsView').then(m => ({ default: m.BotsView })))
+const ClickMapView     = lazy(() => import('./components/behavior/ClickMapView').then(m => ({ default: m.ClickMapView })))
 const ConversionsView  = lazy(() => import('./components/conversions/ConversionsView').then(m => ({ default: m.ConversionsView })))
 const FunnelsView      = lazy(() => import('./components/behavior/FunnelsView').then(m => ({ default: m.FunnelsView })))
 const PagesView        = lazy(() => import('./components/behavior/PagesView').then(m => ({ default: m.PagesView })))
@@ -208,7 +209,7 @@ export function App() {
       case 'branding': return <BrandingView site={query.site} onSaved={reloadBranding} />
       case 'behavior': return (
         <div className="space-y-6">
-          <HeatmapOverlay cells={cells} />
+          <ClickMapView site={query.site} />
           <ZoneStats zones={zones} />
         </div>
       )
