@@ -5,16 +5,20 @@ import { useAsync } from '@/hooks/useAsync'
 import { Section } from '@/components/kit/Section'
 import { BarRows, type BarRow } from '@/components/kit/BarRows'
 import { HeatmapOverlay } from '@/components/HeatmapOverlay'
+import { LivePageOverlay } from './LivePageOverlay'
 import { cn } from '@/lib/utils'
 import { LoadingState, ErrorState } from '@/components/shell/states'
 
 type Device = 'all' | 'desktop' | 'mobile'
+const LIVE_BASE_KEY = 'analyticskit_live_base'
 
 export function ClickMapView({ site }: { site: string }) {
   const els = useAsync(() => fetchClickElements(site), [site])
   const hm  = useAsync(() => fetchHeatmap(site), [site])
   const [url, setUrl] = useState<string>('')
   const [device, setDevice] = useState<Device>('all')
+  const [mode, setMode] = useState<'dots' | 'live'>('dots')
+  const [baseUrl, setBaseUrl] = useState<string>(() => localStorage.getItem(LIVE_BASE_KEY) || '')
 
   const elements = els.data ?? []
   const cells = hm.data ?? []
@@ -86,9 +90,31 @@ export function ClickMapView({ site }: { site: string }) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        {/* Heatmap canvas */}
+        {/* Heatmap — dots or overlaid on the real page */}
         <Section title="Click density" desc={activeUrl ? `Hot zones on ${activeUrl}` : 'Pick a page above'}>
-          <HeatmapOverlay cells={heatCells} />
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-md border border-border p-0.5 text-[12px] font-medium">
+              {(['dots', 'live'] as const).map(mo => (
+                <button key={mo} onClick={() => setMode(mo)}
+                  className={cn('rounded px-2.5 py-1 transition-colors', mode === mo ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {mo === 'dots' ? 'Dots' : 'Real page'}
+                </button>
+              ))}
+            </div>
+            {mode === 'live' && (
+              <input
+                value={baseUrl}
+                onChange={e => { setBaseUrl(e.target.value); localStorage.setItem(LIVE_BASE_KEY, e.target.value) }}
+                placeholder="https://your-app-url.com  (page origin to overlay)"
+                className="h-8 min-w-[260px] flex-1 rounded-md border border-border bg-background px-2 text-[12px]"
+              />
+            )}
+          </div>
+          {mode === 'dots'
+            ? <HeatmapOverlay cells={heatCells} />
+            : baseUrl
+              ? <LivePageOverlay baseUrl={baseUrl} path={activeUrl} cells={heatCells} device={device} />
+              : <p className="py-10 text-center text-sm text-muted-foreground">Enter your app's URL above to overlay the heatmap on the real page.</p>}
         </Section>
 
         {/* Most-clicked elements — the interpretable "what was touched" */}
